@@ -4,10 +4,9 @@ import base64
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from lit import config
 from lit.jwxt import JWXTClient
-from lit.xiaoai import XiaoAISpeaker, run_async
+from lit.tasks import BackgroundTasks
+from lit.xiaoai import XiaoAISpeaker
 from lit.xiaoai.exceptions import QRSessionError
-from scheduler import CourseScheduler
-from cookie_manager import CookieManager
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +14,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 
 jwxt_client = JWXTClient()
 xiaoai_speaker = XiaoAISpeaker()
-scheduler = CourseScheduler(jwxt_client, xiaoai_speaker)
-cookie_manager = CookieManager(jwxt_client, xiaoai_speaker)
+tasks = BackgroundTasks(jwxt_client, xiaoai_speaker)
 
 
 @app.route("/")
@@ -157,7 +155,7 @@ def xiaoai_manual_cookie():
 @app.route("/api/xiaoai/devices")
 def xiaoai_devices():
     try:
-        devices = run_async(xiaoai_speaker.get_devices())
+        devices = xiaoai_speaker.get_devices()
         return jsonify({"success": True, "devices": devices})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
@@ -170,7 +168,7 @@ def xiaoai_select_device():
     if not device_id:
         return jsonify({"success": False, "message": "设备ID为空"})
 
-    run_async(xiaoai_speaker.select_device(device_id))
+    xiaoai_speaker.select_device(device_id)
     return jsonify({"success": True, "message": "设备已选择"})
 
 
@@ -225,8 +223,7 @@ def course_time_map():
 
 def start_background_tasks():
     try:
-        cookie_manager.start()
-        scheduler.start()
+        tasks.start()
     except Exception as e:
         logger.error(f"后台任务启动失败: {e}")
 

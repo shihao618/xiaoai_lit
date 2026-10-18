@@ -1,19 +1,23 @@
+"""统一后台任务模块：课表刷新、课程提醒、双系统 Cookie 检查（单调度器，D5/D4）。
+
+合并原 scheduler.CourseScheduler 与 cookie_manager.CookieManager，
+单一 BackgroundScheduler 承载全部 job，触发时刻与启动时序零变化。
+"""
 import logging
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from lit import config
-from lit.jwxt import JWXTClient
-from lit.xiaoai import XiaoAISpeaker
 
 logger = logging.getLogger(__name__)
 
 
-class CourseScheduler:
-    def __init__(self, jwxt_client=None, xiaoai_speaker=None):
+class BackgroundTasks:
+    def __init__(self, jwxt_client, xiaoai_speaker):
         self.scheduler = BackgroundScheduler()
-        self.jwxt = jwxt_client or JWXTClient()
-        self.speaker = xiaoai_speaker or XiaoAISpeaker()
+        self.jwxt = jwxt_client
+        self.speaker = xiaoai_speaker
         self.today_courses = []
 
     def refresh_course_table(self):
@@ -70,8 +74,45 @@ class CourseScheduler:
         afternoon = [c for c in self.today_courses if 5 <= c.get("section_start", 99) <= 8]
         self.speaker.remind_afternoon(afternoon)
 
+    def check_jwxt_cookie(self):
+        logger.info("检查教务系统Cookie...")
+        valid = self.jwxt.check_cookie_valid()
+        if not valid:
+            locked, lock_time = self.jwxt.is_locked()
+            if locked:
+                logger.warning(f"教务系统账号锁定/冷却中，解锁时间: {lock_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                logger.warning("教务系统Cookie失效，请在配置页面重新登录")
+        return valid
+
+    def check_xiaoai_cookie(self):
+        logger.info("检查小爱音箱Cookie...")
+        try:
+            valid = self.speaker.check_cookie_valid()
+            if not valid:
+                logger.warning("小爱音箱Cookie失效，请在配置页面重新登录")
+            return valid
+        except Exception as e:
+            logger.error(f"小爱Cookie检查异常: {e}")
+            return False
+
+    def refresh_all(self):
+        self.check_jwxt_cookie()
+        self.check_xiaoai_cookie()
+
     def start(self):
+        self.scheduler.add_job(
+            self.refresh_all,
+            CronTrigger(minute="*/30"),
+            id="cookie_refresh",
+            replace_existing=True,
+        )
         self.scheduler.start()
+        logger.info("Cookie管理器已启动，每30分钟检查一次")
+        try:
+            self.check_xiaoai_cookie()
+        except Exception as e:
+            logger.error(f"启动时小爱Cookie检查失败: {e}")
         logger.info("调度器已启动")
         self.refresh_course_table()
         self.scheduler.add_job(self.refresh_course_table, CronTrigger(hour=6, minute=0), id="refresh_daily", replace_existing=True)
@@ -80,3 +121,4 @@ class CourseScheduler:
     def stop(self):
         self.scheduler.shutdown()
         logger.info("调度器已停止")
+        logger.info("Cookie管理器已停止")
