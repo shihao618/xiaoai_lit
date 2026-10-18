@@ -39,7 +39,11 @@
 ### 2. 构建并启动
 
 ```bash
+# Docker（推荐）
 docker-compose up -d --build
+
+# 或本地直接运行
+python main.py
 ```
 
 ### 3. 扫码登录小爱音箱
@@ -72,21 +76,49 @@ docker-compose logs -f
 
 ```
 LIT/
-├── config.py          # 配置（环境变量覆盖）
-├── jwxt.py            # 教务系统登录与课表获取（JSON API）
-├── xiaoai/           # 小爱音箱包（扫码登录 + MiNA 播报）
-│   ├── account.py    #   小米账号扫码协议（申请/轮询/换Token）
-│   ├── mina.py       #   MiNA 播报协议（TTS/URL播放/状态）
-│   ├── credentials.py#   凭证存储（持久化/恢复/失效标记）
-│   ├── qrlogin.py    #   扫码会话管理与二维码生成
-│   └── speaker.py    #   门面（状态机 + 对外接口）
-├── scheduler.py       # 定时调度（智能提醒时间计算）
-├── main.py            # 主入口
-├── Dockerfile         # Docker构建文件
-├── docker-compose.yml # Docker Compose配置
-├── requirements.txt   # Python依赖
-└── cache/             # 课表缓存目录
+├── main.py               # 唯一入口：日志初始化 → create_app() → app.run
+├── conftest.py           # pytest 根配置（sys.path 锚定 + 目录隔离）
+├── lit/                  # 统一业务包
+│   ├── config/           # 配置域：环境变量加载与默认值
+│   │   ├── jwxt.py       #   教务系统配置（地址/账号/学期代码）
+│   │   ├── xiaoai.py     #   小爱音箱配置（TTS 备用地址）
+│   │   ├── schedule.py   #   调度配置（提醒提前量/课程时间表）
+│   │   └── paths.py      #   路径配置（BASE_DIR/DATA_DIR/CACHE_DIR）
+│   ├── jwxt/             # 教务系统域（门面 + 5 领域模块）
+│   │   ├── client.py     #   JWXTClient 门面（对外唯一接口）
+│   │   ├── auth.py       #   登录与验证码 OCR
+│   │   ├── lock.py       #   账号锁定与冷却
+│   │   ├── cookies.py    #   Cookie 持久化
+│   │   ├── xnxqdm.py     #   学期代码缓存
+│   │   └── courses.py    #   课表获取与解析
+│   ├── xiaoai/           # 小爱音箱域（10 模块）
+│   │   ├── speaker.py    #   XiaoAISpeaker 门面（状态机 + 对外接口）
+│   │   ├── account.py    #   小米账号扫码协议（申请/轮询/换 Token）
+│   │   ├── mina.py       #   MiNA 播报协议（TTS/URL 播放/状态）
+│   │   ├── credentials.py#   凭证存储（持久化/恢复/失效标记）
+│   │   ├── qrlogin.py    #   扫码会话管理与二维码生成
+│   │   ├── tts.py        #   TTS 合成与音频缓存
+│   │   └── ...           #   httpclient / constants / exceptions
+│   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒）
+│   └── web/              # Web 层
+│       ├── app.py        #   create_app() 应用工厂（对象装配 + 启动后台任务）
+│       └── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
+├── templates/index.html  # 前端单页
+├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/，174 用例）
+├── Dockerfile / docker-compose.yml / requirements.txt
+├── cache/                # 课表缓存（course_table.json）
+└── data/                 # 运行数据（教务 Cookie/学期代码/小爱凭证/TTS 音频缓存）
 ```
+
+## 模块地图
+
+| 模块 | 职责 |
+|------|------|
+| `lit/config/` | 环境变量加载与默认值，按 jwxt / xiaoai / schedule / paths 四域拆分 |
+| `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 5 个领域模块 |
+| `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
+| `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、课前 30 分钟提醒 |
+| `lit/web/` | Flask 应用工厂与 5 蓝图（共 18 条路由），对象装配与启动时序集中于此 |
 
 ## 技术细节
 
