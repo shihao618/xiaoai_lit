@@ -9,4 +9,3 @@ conftest.py
 cache/
 data/
 docker-compose.yml
-Dockerfile.local
