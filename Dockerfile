@@ -21,6 +21,6 @@ ENV PYTHONUNBUFFERED=1
 ENV CACHE_DIR=/app/cache
 ENV DATA_DIR=/app/data
 
-EXPOSE 5000
+EXPOSE 10379
 
 CMD ["python", "main.py"]

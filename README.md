@@ -38,7 +38,7 @@
 git clone https://github.com/shihao618/xiaoai_lit.git && cd xiaoai_lit && docker compose up -d --build
 ```
 
-启动后打开 `http://localhost:5000` 完成后续配置（教务账号 + 扫码绑定音箱）。
+启动后打开 `http://localhost:10379` 完成后续配置（教务账号 + 扫码绑定音箱）。
 
 ### 1. 配置教务系统账号
 
@@ -60,7 +60,7 @@ python main.py
 
 ### 3. 扫码登录小爱音箱
 
-1. 打开 `http://localhost:5000`，进入小爱音箱配置区
+1. 打开 `http://localhost:10379`，进入小爱音箱配置区
 2. 点击"扫码登录"，用小米手机（已绑定小爱音箱的账号）扫描页面二维码并确认
 3. 登录成功后页面自动展示设备列表，选择目标音箱即可
 
