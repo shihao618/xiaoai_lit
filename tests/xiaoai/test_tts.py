@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from xiaoai import tts
+from lit.xiaoai import tts
 
 
 @pytest.fixture

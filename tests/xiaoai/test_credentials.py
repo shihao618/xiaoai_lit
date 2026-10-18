@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 
-from xiaoai.credentials import CredentialStore, Credentials
+from lit.xiaoai.credentials import CredentialStore, Credentials
 
 
 def write(path, data):

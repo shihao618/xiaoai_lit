@@ -4,10 +4,10 @@ from datetime import datetime
 import pytest
 
 from lit import config
-from xiaoai import run_async
-from xiaoai.account import PollResult
-from xiaoai.credentials import CredentialStore, Credentials
-from xiaoai.exceptions import (
+from lit.xiaoai import run_async
+from lit.xiaoai.account import PollResult
+from lit.xiaoai.credentials import CredentialStore, Credentials
+from lit.xiaoai.exceptions import (
     CommandRejectedError,
     CredentialRejectedError,
     NetworkError,
@@ -15,8 +15,8 @@ from xiaoai.exceptions import (
     RequestTimeoutError,
     XiaoAIError,
 )
-from xiaoai.mina import PlayerStatus, SpeakerDevice
-from xiaoai.speaker import XiaoAISpeaker
+from lit.xiaoai.mina import PlayerStatus, SpeakerDevice
+from lit.xiaoai.speaker import XiaoAISpeaker
 
 
 class StubMina:
@@ -90,7 +90,7 @@ def login(speaker, devices=None):
 
 @pytest.fixture
 def no_sleep(monkeypatch):
-    monkeypatch.setattr("xiaoai.speaker.time.sleep", lambda s: None)
+    monkeypatch.setattr("lit.xiaoai.speaker.time.sleep", lambda s: None)
 
 
 # ---------- run_async 垫片 ----------
@@ -275,13 +275,13 @@ def _enable_local_tts(monkeypatch):
     monkeypatch.setattr(config, "XIAOAI_TTS_BASE_URL",
                         "http://127.0.0.1:5000")
     monkeypatch.setattr(
-        "xiaoai.tts.synthesize_announcement",
+        "lit.xiaoai.tts.synthesize_announcement",
         lambda prompt, text: ("j.mp3", 10.0))
     monkeypatch.setattr(
-        "xiaoai.tts.audio_url",
+        "lit.xiaoai.tts.audio_url",
         lambda f: "http://127.0.0.1:5000/audio/tts/" + f)
     monkeypatch.setattr(
-        "xiaoai.tts.silence_url",
+        "lit.xiaoai.tts.silence_url",
         lambda: "http://127.0.0.1:5000/audio/tts/silence30.mp3")
 
 
@@ -292,7 +292,7 @@ def _fast_clock(monkeypatch):
         t[0] += 2.0
         return t[0]
 
-    monkeypatch.setattr("xiaoai.speaker.time.monotonic", fake_monotonic)
+    monkeypatch.setattr("lit.xiaoai.speaker.time.monotonic", fake_monotonic)
 
 
 def test_speak_local_tts_stops_when_status_stuck_paused(

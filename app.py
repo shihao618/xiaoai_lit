@@ -4,8 +4,8 @@ import base64
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from lit import config
 from lit.jwxt import JWXTClient
-from xiaoai import XiaoAISpeaker, run_async
-from xiaoai.exceptions import QRSessionError
+from lit.xiaoai import XiaoAISpeaker, run_async
+from lit.xiaoai.exceptions import QRSessionError
 from scheduler import CourseScheduler
 from cookie_manager import CookieManager
 
@@ -113,7 +113,7 @@ def xiaoai_login_status():
 @app.route("/audio/tts/<path:filename>")
 def tts_audio(filename):
     """本地 TTS 合成音频服务（音箱通过局域网拉流播放）。"""
-    from xiaoai import tts as tts_module
+    from lit.xiaoai import tts as tts_module
 
     if not filename.endswith(".mp3") or "/" in filename or "\\" in filename:
         return jsonify({"success": False, "message": "非法文件名"}), 404

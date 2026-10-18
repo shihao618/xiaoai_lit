@@ -1,8 +1,8 @@
 import pytest
 import requests
 
-from xiaoai import constants
-from xiaoai.exceptions import (
+from lit.xiaoai import constants
+from lit.xiaoai.exceptions import (
     CommandRejectedError,
     CredentialRejectedError,
     NetworkError,
@@ -11,7 +11,7 @@ from xiaoai.exceptions import (
     ResponseFormatError,
     classify_response,
 )
-from xiaoai.httpclient import XiaomiHTTPClient, trusted_url
+from lit.xiaoai.httpclient import XiaomiHTTPClient, trusted_url
 
 HTTPS_OK = "https://account.xiaomi.com/x"
 

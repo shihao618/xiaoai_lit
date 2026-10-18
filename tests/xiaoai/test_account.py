@@ -5,9 +5,9 @@ from urllib.parse import quote
 
 import pytest
 
-from xiaoai import constants
-from xiaoai.account import XiaomiAccountClient, login_device_id
-from xiaoai.exceptions import (
+from lit.xiaoai import constants
+from lit.xiaoai.account import XiaomiAccountClient, login_device_id
+from lit.xiaoai.exceptions import (
     CredentialRejectedError,
     RateLimitedError,
     RequestTimeoutError,

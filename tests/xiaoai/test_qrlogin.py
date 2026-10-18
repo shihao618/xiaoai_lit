@@ -4,10 +4,10 @@ import time
 
 import pytest
 
-from xiaoai import constants
-from xiaoai.account import PollResult
-from xiaoai.exceptions import QRSessionError, RateLimitedError
-from xiaoai.qrlogin import QRLoginManager, render_qr_png_data_uri
+from lit.xiaoai import constants
+from lit.xiaoai.account import PollResult
+from lit.xiaoai.exceptions import QRSessionError, RateLimitedError
+from lit.xiaoai.qrlogin import QRLoginManager, render_qr_png_data_uri
 
 
 class StubAccount:

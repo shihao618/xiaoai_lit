@@ -2,7 +2,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from xiaoai import run_async
+from lit.xiaoai import run_async
 
 logger = logging.getLogger(__name__)
 

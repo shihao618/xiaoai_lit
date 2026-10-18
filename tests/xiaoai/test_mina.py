@@ -2,14 +2,14 @@ import json
 
 import pytest
 
-from xiaoai import constants
-from xiaoai.credentials import Credentials
-from xiaoai.exceptions import (
+from lit.xiaoai import constants
+from lit.xiaoai.credentials import Credentials
+from lit.xiaoai.exceptions import (
     CommandRejectedError,
     CredentialRejectedError,
     ResponseFormatError,
 )
-from xiaoai.mina import MiNAClient, parse_play_status
+from lit.xiaoai.mina import MiNAClient, parse_play_status
 
 
 class StubHTTP:
