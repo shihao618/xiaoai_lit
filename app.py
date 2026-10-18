@@ -2,7 +2,7 @@ import os
 import logging
 import base64
 from flask import Flask, render_template, jsonify, request, send_from_directory
-import config
+from lit import config
 from jwxt import JWXTClient
 from xiaoai import XiaoAISpeaker, run_async
 from xiaoai.exceptions import QRSessionError

@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import List, Optional
 
-import config
+from lit import config
 
 from . import constants
 from .account import XiaomiAccountClient, login_device_id

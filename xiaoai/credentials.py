@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-import config
+from lit import config
 
 logger = logging.getLogger(__name__)
 

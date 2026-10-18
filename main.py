@@ -1,7 +1,7 @@
 import logging
 import sys
 
-import config
+from lit import config
 
 logging.basicConfig(
     level=config.LOG_LEVEL,

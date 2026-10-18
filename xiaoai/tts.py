@@ -10,7 +10,7 @@ import hashlib
 import logging
 import os
 
-import config
+from lit import config
 
 logger = logging.getLogger(__name__)
 

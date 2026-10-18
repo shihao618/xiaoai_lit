@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytest
 
-import config
+from lit import config
 from xiaoai import run_async
 from xiaoai.account import PollResult
 from xiaoai.credentials import CredentialStore, Credentials

@@ -9,8 +9,8 @@ from xiaoai import tts
 
 @pytest.fixture
 def tts_env(tmp_path, monkeypatch):
-    monkeypatch.setattr("config.DATA_DIR", str(tmp_path))
-    monkeypatch.setattr("config.XIAOAI_TTS_BASE_URL", "http://192.168.0.9:5000")
+    monkeypatch.setattr("lit.config.DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("lit.config.XIAOAI_TTS_BASE_URL", "http://192.168.0.9:5000")
     return tmp_path
 
 

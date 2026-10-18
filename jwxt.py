@@ -8,7 +8,7 @@ import ddddocr
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from datetime import datetime, timedelta
-import config
+from lit import config
 
 logger = logging.getLogger(__name__)
 

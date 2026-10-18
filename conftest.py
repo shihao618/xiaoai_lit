@@ -13,7 +13,7 @@ def isolated_dirs(tmp_path, monkeypatch):
     cache_dir = tmp_path / "cache"
     data_dir.mkdir()
     cache_dir.mkdir()
-    import config
+    from lit import config
     monkeypatch.setattr(config, "DATA_DIR", str(data_dir))
     monkeypatch.setattr(config, "CACHE_DIR", str(cache_dir))
     return {"data": str(data_dir), "cache": str(cache_dir)}
