@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LIT 课表提醒配置</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
+.card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.card h2 { font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.card h2 .icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 14px; }
+.status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-left: 8px; }
+.status-ok { background: #e6f4ea; color: #137333; }
+.status-fail { background: #fce8e6; color: #c5221f; }
+.status-warn { background: #fef7e0; color: #b06000; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 14px; color: #666; margin-bottom: 6px; }
+.form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.form-group input:focus { border-color: #1a73e8; }
+.btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+.btn-primary { background: #1a73e8; color: #fff; }
+.btn-primary:hover { background: #1557b0; }
+.btn-secondary { background: #f1f3f4; color: #333; }
+.btn-secondary:hover { background: #e8eaed; }
+.btn-danger { background: #c5221f; color: #fff; }
+.btn-row { display: flex; gap: 12px; margin-top: 8px; }
+.captcha-row { display: flex; gap: 12px; align-items: center; }
+.captcha-row img { height: 40px; border-radius: 6px; border: 1px solid #ddd; cursor: pointer; }
+.captcha-row input { flex: 1; }
+.device-list { margin-top: 12px; }
+.device-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+.device-item:hover { border-color: #1a73e8; background: #f8faff; }
+.device-item.selected { border-color: #1a73e8; background: #e8f0fe; }
+.device-item .name { font-weight: 600; }
+.device-item .model { font-size: 12px; color: #999; }
+.device-item .radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #ddd; }
+.device-item.selected .radio { border-color: #1a73e8; background: #1a73e8; }
+.alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+.alert-danger { background: #fce8e6; color: #c5221f; border: 1px solid #f5c6cb; }
+.alert-success { background: #e6f4ea; color: #137333; border: 1px solid #ceead6; }
+.alert-info { background: #e8f0fe; color: #1967d2; border: 1px solid #d2e3fc; }
+.alert-warning { background: #fef7e0; color: #b06000; border: 1px solid #feefc3; }
+.otp-section { display: none; margin-top: 12px; }
+.otp-section.show { display: block; }
+.course-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.course-table th, .course-table td { padding: 8px 12px; border: 1px solid #eee; text-align: left; font-size: 13px; }
+.course-table th { background: #f8f9fa; font-weight: 600; }
+.time-map { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+.time-item { padding: 8px; border: 1px solid #eee; border-radius: 6px; text-align: center; font-size: 12px; }
+.time-item .section { font-weight: 600; color: #1a73e8; }
+.loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #ddd; border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>LIT 课表提醒配置</h1>
+
+<div id="global-alerts"></div>
+
+<div class="card">
+<h2><span class="icon" style="background:#e8f0fe;color:#1a73e8">教</span>教务系统登录 <span id="jwxt-badge" class="status-badge status-warn">未登录</span></h2>
+<div id="jwxt-alert"></div>
+<div class="form-group">
+<label>账号</label>
+<input type="text" id="jwxt-account" placeholder="学号">
+</div>
+<div class="form-group">
+<label>密码</label>
+<input type="password" id="jwxt-password" placeholder="密码">
+</div>
+<div class="form-group">
+<label>验证码（已自动识别，请核对后登录）</label>
+<div class="captcha-row">
+<img id="jwxt-captcha" src="" alt="点击获取验证码" onclick="loadCaptcha()">
+<input type="text" id="jwxt-verifycode" placeholder="输入验证码">
+</div>
+</div>
+<div class="btn-row">
+<button class="btn btn-primary" onclick="jwxtLogin()">登录</button>
+<button class="btn btn-secondary" onclick="loadCaptcha()">刷新验证码</button>
+</div>
+
+<div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px">
+<details>
+<summary style="cursor:pointer;font-size:14px;color:#666">手动填入Cookie（登录失败时使用）</summary>
+<div class="alert alert-info" style="margin-top:8px">在浏览器中登录 <a href="https://lljw.lit.edu.cn" target="_blank">lljw.lit.edu.cn</a>，按F12打开开发者工具 → Network → 任意请求 → Headers → Cookie，复制完整值粘贴到下方。</div>
+<div class="form-group">
+<label>Cookie字符串</label>
+<textarea id="jwxt-manual-cookie" rows="3" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:monospace;resize:vertical" placeholder="JSESSIONID=xxx; other=yyy"></textarea>
+</div>
+<button class="btn btn-secondary" onclick="jwxtManualCookie()">设置Cookie</button>
+</details>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="icon" style="background:#e6f4ea;color:#137333">爱</span>小爱音箱登录 <span id="xiaoai-badge" class="status-badge status-warn">未登录</span></h2>
+<div id="xiaoai-alert"></div>
+<div class="btn-row">
+<button class="btn btn-primary" onclick="xiaoaiQrStart()">扫码登录</button>
+</div>
+
+<div id="qr-section" class="hidden" style="text-align:center;margin-top:16px">
+<img id="qr-image" src="" alt="小米登录二维码" style="width:220px;height:220px;border:1px solid #eee;border-radius:8px">
+<div id="qr-status" style="margin-top:8px;font-size:13px;color:#666">等待扫码...</div>
+</div>
+
+<div id="device-section" class="hidden">
+<h3 style="margin:16px 0 8px;font-size:15px">选择小爱音箱设备</h3>
+<div id="device-list" class="device-list"></div>
+</div>
+
+<div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px">
+<details>
+<summary style="cursor:pointer;font-size:14px;color:#666">手动填入Cookie / Token（登录失败时使用）</summary>
+<div class="alert alert-info" style="margin-top:8px">
+<strong>推荐方法</strong>：浏览器访问 <a href="https://mina.mi.com" target="_blank">mina.mi.com</a>（小爱音箱管理页），登录小米账号后，按F12 → Application → Cookies → 找到 <code>api2.mina.mi.com</code> 域名，复制 <code>userId</code> 和 <code>serviceToken</code> 的值，组成 <code>userId=xxx; serviceToken=xxx</code> 粘贴到下方。<br>
+<span style="color:#999;font-size:12px">注意：必须从 api2.mina.mi.com 域名的 Cookie 中获取，不是 account.xiaomi.com。</span>
+</div>
+<div class="form-group">
+<label>小米账号备注名（可选，用于状态显示）</label>
+<input type="text" id="xiaoai-username" placeholder="小米账号（可选）">
+</div>
+<div class="form-group">
+<label>Cookie字符串（从浏览器复制）</label>
+<textarea id="xiaoai-manual-cookie" rows="3" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:monospace;resize:vertical" placeholder="userId=xxx; serviceToken=xxx; ..."></textarea>
+</div>
+<button class="btn btn-secondary" onclick="xiaoaiManualCookie()">设置Cookie</button>
+<div style="margin-top:12px;font-size:12px;color:#999">或使用 userId + passToken（从 account.xiaomi.com Cookie获取）：</div>
+<div class="form-group" style="margin-top:4px">
+<label>userId</label>
+<input type="text" id="xiaoai-user-id" placeholder="从浏览器Cookie中获取userId">
+</div>
+<div class="form-group">
+<label>passToken</label>
+<input type="text" id="xiaoai-service-token" placeholder="从浏览器Cookie中获取passToken">
+</div>
+<button class="btn btn-secondary" onclick="xiaoaiManualToken()">设置Token</button>
+</details>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="icon" style="background:#fef7e0;color:#b06000">课</span>课表预览</h2>
+<button class="btn btn-secondary" onclick="loadCourses()">刷新课表</button>
+<div id="course-preview" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+<h2><span class="icon" style="background:#f1f3f4;color:#666">时</span>上课时间表</h2>
+<div id="time-map" class="time-map"></div>
+</div>
+
+<div class="card">
+<h2><span class="icon" style="background:#fce8e6;color:#c5221f">测</span>播报测试</h2>
+<div class="form-group">
+<label>测试文字</label>
+<input type="text" id="test-text" value="这是一条测试播报" placeholder="输入测试文字">
+</div>
+<button class="btn btn-primary" onclick="testSpeak()">测试播报</button>
+</div>
+</div>
+
+<script>
+const API = '';
+let selectedDeviceId = null;
+
+async function api(url, opts={}) {
+const r = await fetch(API+url, {headers:{'Content-Type':'application/json'}, ...opts});
+return r.json();
+}
+
+function setBadge(id, valid, text) {
+const el = document.getElementById(id);
+el.className = 'status-badge ' + (valid ? 'status-ok' : 'status-fail');
+el.textContent = text || (valid ? '已登录' : '未登录');
+}
+
+function showAlert(id, type, msg) {
+const el = document.getElementById(id);
+if (!msg) { el.innerHTML = ''; return; }
+el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+}
+
+async function loadStatus() {
+const s = await api('/api/status');
+setBadge('jwxt-badge', s.jwxt.cookie_valid, s.jwxt.cookie_valid ? '已登录' : (s.jwxt.locked ? '已锁定' : '未登录'));
+setBadge('xiaoai-badge', s.xiaoai.cookie_valid, s.xiaoai.cookie_valid ? '已登录' : '未登录');
+
+const ga = document.getElementById('global-alerts');
+let alerts = '';
+if (s.jwxt.locked) {
+const t = s.jwxt.lock_time ? new Date(s.jwxt.lock_time).toLocaleString('zh-CN') : '未知';
+alerts += `<div class="alert alert-danger">⚠ 教务系统账号已锁定，解锁时间：${t}。<b>请勿重复尝试登录</b>，否则会延长锁定时间。</div>`;
+} else if (!s.jwxt.cookie_valid && s.jwxt.account) {
+alerts += `<div class="alert alert-danger">教务系统Cookie已失效，请重新登录！</div>`;
+}
+if (!s.xiaoai.cookie_valid && s.xiaoai.username) alerts += `<div class="alert alert-danger">小爱音箱Cookie已失效，请重新登录！</div>`;
+ga.innerHTML = alerts;
+
+if (s.jwxt.account) document.getElementById('jwxt-account').value = s.jwxt.account;
+if (s.xiaoai.username) document.getElementById('xiaoai-username').value = s.xiaoai.username;
+if (s.xiaoai.device_id) selectedDeviceId = s.xiaoai.device_id;
+return s;
+}
+
+async function loadCaptcha() {
+const r = await api('/api/jwxt/captcha');
+if (r.success) {
+document.getElementById('jwxt-captcha').src = 'data:image/png;base64,' + r.image;
+if (r.code) {
+document.getElementById('jwxt-verifycode').value = r.code;
+}
+} else {
+showAlert('jwxt-alert', 'danger', '获取验证码失败: ' + r.message);
+}
+}
+
+async function jwxtLogin() {
+const account = document.getElementById('jwxt-account').value;
+const password = document.getElementById('jwxt-password').value;
+const verifycode = document.getElementById('jwxt-verifycode').value;
+showAlert('jwxt-alert', 'info', '正在登录...');
+const r = await api('/api/jwxt/login', {method:'POST', body:JSON.stringify({account, password, verifycode})});
+if (r.success) {
+showAlert('jwxt-alert', 'success', '教务系统登录成功！');
+setBadge('jwxt-badge', true);
+} else {
+if (r.locked) {
+const t = r.lock_time ? new Date(r.lock_time).toLocaleString('zh-CN') : '未知';
+showAlert('jwxt-alert', 'danger', `账号已锁定或进入冷却期，解锁时间：${t}。<b>请勿继续尝试登录！</b>`);
+} else {
+showAlert('jwxt-alert', 'danger', '登录失败: ' + r.message);
+loadCaptcha();
+}
+}
+loadStatus();
+}
+
+let qrSessionId = null;
+let qrPollTimer = null;
+
+async function xiaoaiQrStart() {
+    showAlert('xiaoai-alert', 'info', '正在获取登录二维码...');
+    let r;
+    try {
+        r = await api('/api/xiaoai/qr/start', {method:'POST', body:JSON.stringify({})});
+    } catch (e) {
+        showAlert('xiaoai-alert', 'danger', '无法连接服务，请稍后重试');
+        return;
+    }
+    if (!r.success) {
+        showAlert('xiaoai-alert', 'danger', r.message || '无法连接小米服务，请稍后重试');
+        return;
+    }
+    qrSessionId = r.session_id;
+    document.getElementById('qr-image').src = r.qr_image;
+    document.getElementById('qr-section').classList.remove('hidden');
+    document.getElementById('qr-status').textContent = '请使用小米手机App（扫一扫）扫描二维码';
+    showAlert('xiaoai-alert', 'info', '请使用小米手机App扫描二维码完成登录');
+    pollQrStatus();
+}
+
+async function pollQrStatus() {
+    if (qrPollTimer) clearInterval(qrPollTimer);
+    qrPollTimer = setInterval(async () => {
+        if (!qrSessionId) { clearInterval(qrPollTimer); qrPollTimer = null; return; }
+        let st;
+        try {
+            st = await api('/api/xiaoai/qr/poll?session_id=' + encodeURIComponent(qrSessionId));
+        } catch (e) {
+            return;
+        }
+        if (st.status === 'waiting') {
+            document.getElementById('qr-status').textContent = '等待扫码...';
+        } else if (st.status === 'waiting_limited') {
+            document.getElementById('qr-status').textContent = '扫码状态查询受限，请稍候（二维码仍可使用）';
+        } else if (st.status === 'exchanging') {
+            document.getElementById('qr-status').textContent = '扫码成功，正在完成登录...';
+        } else if (st.status === 'confirmed') {
+            clearInterval(qrPollTimer); qrPollTimer = null; qrSessionId = null;
+            document.getElementById('qr-section').classList.add('hidden');
+            showAlert('xiaoai-alert', 'success', '小爱音箱登录成功！');
+            setBadge('xiaoai-badge', true);
+            if (st.devices && st.devices.length) showDevices(st.devices);
+            loadStatus();
+        } else if (st.status === 'expired') {
+            clearInterval(qrPollTimer); qrPollTimer = null;
+            document.getElementById('qr-status').textContent = '二维码已过期，请重新点击"扫码登录"';
+            showAlert('xiaoai-alert', 'warning', '二维码已过期，请刷新后重新扫码');
+        } else if (st.status === 'failed') {
+            clearInterval(qrPollTimer); qrPollTimer = null; qrSessionId = null;
+            document.getElementById('qr-section').classList.add('hidden');
+            showAlert('xiaoai-alert', 'danger', st.message || '登录失败');
+            loadStatus();
+        }
+    }, 2000);
+}
+
+function showDevices(devices) {
+const list = document.getElementById('device-list');
+document.getElementById('device-section').classList.remove('hidden');
+list.innerHTML = '';
+if (!devices || !devices.length) {
+list.innerHTML = '<div class="alert alert-warning">未找到设备</div>';
+return;
+}
+devices.forEach(d => {
+const item = document.createElement('div');
+item.className = 'device-item' + (d.deviceID === selectedDeviceId ? ' selected' : '');
+item.dataset.deviceId = d.deviceID;
+const hw = d.hardware || '';
+const isSpeaker = hw.startsWith('L') || hw.includes('speaker') || hw.includes('Sound') || d.name.includes('小爱') || d.name.includes('音箱');
+const speakerTag = isSpeaker ? '<span style="color:#137333;font-size:11px;background:#e6f4ea;padding:2px 6px;border-radius:4px;margin-left:6px">音箱</span>' : '<span style="color:#b06000;font-size:11px;background:#fef7e0;padding:2px 6px;border-radius:4px;margin-left:6px">非音箱</span>';
+item.innerHTML = `
+<div>
+<div class="name">${d.name || '未知设备'}${speakerTag}</div>
+<div class="model">${hw} | ${d.deviceID || ''}</div>
+</div>
+<div class="radio"></div>
+`;
+item.onclick = () => selectDevice(d.deviceID, item);
+list.appendChild(item);
+});
+}
+
+async function selectDevice(deviceId, itemEl) {
+selectedDeviceId = deviceId;
+const r = await api('/api/xiaoai/select_device', {method:'POST', body:JSON.stringify({device_id: deviceId})});
+if (r.success) {
+document.querySelectorAll('.device-item').forEach(el => el.classList.remove('selected'));
+if (itemEl) itemEl.classList.add('selected');
+showAlert('xiaoai-alert', 'success', '设备已选择');
+}
+}
+
+async function loadCourses() {
+document.getElementById('course-preview').innerHTML = '<div class="loading"></div> 正在获取课表...';
+const r = await api('/api/jwxt/courses');
+if (r.success && r.courses) {
+let html = '<table class="course-table"><tr><th>星期</th><th>节次</th><th>时间</th><th>课程</th><th>教室</th><th>教师</th></tr>';
+const dayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+r.courses.forEach(c => {
+html += `<tr><td>${dayNames[c.day]||c.day}</td><td>${c.section_start}-${c.section_end}</td><td>${(c.start_time||'').slice(0,5)}</td><td>${c.name}</td><td>${c.classroom||''}</td><td>${c.teacher||''}</td></tr>`;
+});
+html += '</table>';
+document.getElementById('course-preview').innerHTML = html;
+} else {
+document.getElementById('course-preview').innerHTML = '<div class="alert alert-danger">获取课表失败</div>';
+}
+}
+
+async function loadTimeMap() {
+const r = await api('/api/course_time_map');
+const el = document.getElementById('time-map');
+el.innerHTML = '';
+for (const [section, time] of Object.entries(r)) {
+el.innerHTML += `<div class="time-item"><div class="section">第${section}节</div><div>${time}</div></div>`;
+}
+}
+
+async function testSpeak() {
+const text = document.getElementById('test-text').value;
+showAlert('xiaoai-alert', 'info', '正在播报...');
+const r = await api('/api/xiaoai/test', {method:'POST', body:JSON.stringify({text})});
+if (r.success) {
+showAlert('xiaoai-alert', 'success', '播报成功！');
+} else {
+showAlert('xiaoai-alert', 'danger', '播报失败，请检查小爱音箱是否已登录');
+}
+}
+
+async function jwxtManualCookie() {
+const cookie = document.getElementById('jwxt-manual-cookie').value.trim();
+const account = document.getElementById('jwxt-account').value.trim();
+if (!cookie) { showAlert('jwxt-alert', 'danger', '请输入Cookie'); return; }
+showAlert('jwxt-alert', 'info', '正在设置Cookie...');
+const r = await api('/api/jwxt/manual_cookie', {method:'POST', body:JSON.stringify({cookie, account})});
+if (r.success) {
+showAlert('jwxt-alert', 'success', 'Cookie设置成功！');
+setBadge('jwxt-badge', true);
+loadStatus();
+} else {
+showAlert('jwxt-alert', 'danger', '设置失败: ' + r.message);
+}
+}
+
+async function xiaoaiManualCookie() {
+const cookie = document.getElementById('xiaoai-manual-cookie').value.trim();
+if (!cookie) { showAlert('xiaoai-alert', 'danger', '请输入Cookie'); return; }
+showAlert('xiaoai-alert', 'info', '正在设置Cookie...');
+const r = await api('/api/xiaoai/manual_cookie', {method:'POST', body:JSON.stringify({cookie, username: document.getElementById('xiaoai-username').value.trim()})});
+if (r.success) {
+showAlert('xiaoai-alert', 'success', 'Cookie设置成功！');
+setBadge('xiaoai-badge', true);
+loadStatus();
+} else {
+showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
+}
+}
+
+async function xiaoaiManualToken() {
+const userId = document.getElementById('xiaoai-user-id').value.trim();
+const passToken = document.getElementById('xiaoai-service-token').value.trim();
+if (!userId || !passToken) { showAlert('xiaoai-alert', 'danger', '请输入userId和passToken'); return; }
+const tokenObj = {userId: userId, passToken: passToken};
+showAlert('xiaoai-alert', 'info', '正在设置Token...');
+const r = await api('/api/xiaoai/manual_token', {method:'POST', body:JSON.stringify({token: JSON.stringify(tokenObj), username: document.getElementById('xiaoai-username').value.trim()})});
+if (r.success) {
+showAlert('xiaoai-alert', 'success', 'Token设置成功！');
+setBadge('xiaoai-badge', true);
+loadStatus();
+} else {
+showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
+}
+}
+
+async function xiaoaiManualTokenJson() {
+const token = document.getElementById('xiaoai-manual-token').value.trim();
+if (!token) { showAlert('xiaoai-alert', 'danger', '请输入Token JSON'); return; }
+showAlert('xiaoai-alert', 'info', '正在设置Token...');
+const r = await api('/api/xiaoai/manual_token', {method:'POST', body:JSON.stringify({token, username: document.getElementById('xiaoai-username').value.trim()})});
+if (r.success) {
+showAlert('xiaoai-alert', 'success', 'Token设置成功！');
+setBadge('xiaoai-badge', true);
+loadStatus();
+} else {
+showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
+}
+}
+
+(async () => {
+const s = await loadStatus();
+if (s && !s.jwxt.cookie_valid && !s.jwxt.locked) {
+    await loadCaptcha();
+}
+if (s && s.xiaoai.cookie_valid) {
+    api('/api/xiaoai/devices').then(r => {
+        if (r.success && r.devices && r.devices.length) showDevices(r.devices);
+    }).catch(() => {});
+}
+})();
+loadTimeMap();
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>

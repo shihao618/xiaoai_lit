@@ -1,0 +1,8 @@
+FROM lit-lit-course-reminder:latest
+
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    qrcode>=7.4 pypng>=0.20231015 edge-tts>=6.1.0
+
+COPY . /app
+
+RUN mkdir -p /app/cache /app/data

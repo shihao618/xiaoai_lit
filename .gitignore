@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+cache/
+data/
+.arts/
+.codeartsdoer/specs/refactor_structure/baseline/snapshot/

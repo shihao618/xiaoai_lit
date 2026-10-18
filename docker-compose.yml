@@ -1,0 +1,25 @@
+services:
+  lit-course-reminder:
+    build: .
+    container_name: lit-course-reminder
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - JWXT_BASE_URL=https://lljw.lit.edu.cn
+      - JWXT_ACCOUNT=
+      - JWXT_PASSWORD=
+
+      - XIAOAI_TTS_BACKUP_URL=
+      - REMIND_BEFORE_MINUTES=30
+      - LOG_LEVEL=INFO
+      - CACHE_DIR=/app/cache
+      - DATA_DIR=/app/data
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
