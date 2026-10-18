@@ -3,7 +3,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from lit import config
-from jwxt import JWXTClient
+from lit.jwxt import JWXTClient
 from xiaoai import XiaoAISpeaker
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-import jwxt
-from jwxt import COOLDOWN_MINUTES, MAX_FAILED_ATTEMPTS, JWXTClient
+from lit.jwxt import COOLDOWN_MINUTES, MAX_FAILED_ATTEMPTS, JWXTClient, lock
 
 
 class StubResponse:
@@ -26,18 +25,18 @@ def test_constants_frozen():
 
 def test_parse_lock_time_standard(isolated_dirs):
     client = make_client(isolated_dirs)
-    t = client._parse_lock_time("账号已锁定，解锁时间：2026-10-18 15:30:00 请稍后")
+    t = lock._parse_lock_time("账号已锁定，解锁时间：2026-10-18 15:30:00 请稍后")
     assert t == datetime(2026, 10, 18, 15, 30, 0)
 
 
 def test_parse_lock_time_absent(isolated_dirs):
     client = make_client(isolated_dirs)
-    assert client._parse_lock_time("密码错误") is None
+    assert lock._parse_lock_time("密码错误") is None
 
 
 def test_parse_lock_time_malformed(isolated_dirs):
     client = make_client(isolated_dirs)
-    assert client._parse_lock_time("锁定至 2026-13-45 99:99:99") is None
+    assert lock._parse_lock_time("锁定至 2026-13-45 99:99:99") is None
 
 
 def test_is_locked_future_lock_until(isolated_dirs):
@@ -64,7 +63,7 @@ def test_is_locked_expired_returns_false(isolated_dirs):
 
 
 def _drive_failures(client, monkeypatch, message, attempts):
-    monkeypatch.setattr(client, "_get_captcha_ocr", lambda: "abcd")
+    monkeypatch.setattr("lit.jwxt.auth._get_captcha_ocr", lambda c: "abcd")
     monkeypatch.setattr(client.session, "post",
                         lambda *a, **k: StubResponse({"code": -1, "message": message}))
     return client.login(verifycode="wxyz", max_retries=attempts)
@@ -115,7 +114,7 @@ def test_lock_persistence_expired_not_restored(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
     client._lock_until = datetime.now() - timedelta(minutes=5)
     client._failed_attempts = 2
-    client._save_lock()
+    lock._save_lock(client)
     restored = JWXTClient(account="u1", password="p1")
     assert restored._lock_until is None
     assert restored.is_locked() == (False, None)
@@ -126,6 +125,6 @@ def test_clear_lock_removes_file(isolated_dirs, monkeypatch):
     _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
     lock_file = os.path.join(isolated_dirs["data"], "jwxt_lock.json")
     assert os.path.exists(lock_file)
-    client._clear_lock()
+    lock._clear_lock(client)
     assert not os.path.exists(lock_file)
     assert client._failed_attempts == 0

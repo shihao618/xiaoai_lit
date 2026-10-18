@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 
-from jwxt import JWXTClient
+from lit.jwxt import JWXTClient, cookies
 
 
 def write_cookies(data_dir, payload):
@@ -56,7 +56,7 @@ def test_load_corrupt_json_warns_not_raises(isolated_dirs):
 def test_save_cookies_writes_frozen_structure(isolated_dirs):
     client = JWXTClient(account="u1", password="p1")
     client.session.cookies.set("JSESSIONID", "xyz789")
-    client._save_cookies()
+    cookies._save_cookies(client)
     path = os.path.join(isolated_dirs["data"], "jwxt_cookies.json")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -70,7 +70,7 @@ def test_save_cookies_writes_frozen_structure(isolated_dirs):
 def test_save_then_reload_roundtrip(isolated_dirs):
     client = JWXTClient(account="u1", password="p1")
     client.session.cookies.set("JSESSIONID", "rt01")
-    client._save_cookies()
+    cookies._save_cookies(client)
     reloaded = JWXTClient(account="u1", password="p1")
     assert reloaded.cookie_valid is True
     assert reloaded.session.cookies.get("JSESSIONID") == "rt01"

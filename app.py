@@ -3,7 +3,7 @@ import logging
 import base64
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from lit import config
-from jwxt import JWXTClient
+from lit.jwxt import JWXTClient
 from xiaoai import XiaoAISpeaker, run_async
 from xiaoai.exceptions import QRSessionError
 from scheduler import CourseScheduler
@@ -31,8 +31,7 @@ def jwxt_captcha():
         b64 = base64.b64encode(image_data).decode("utf-8")
         code = ""
         try:
-            jwxt_client._init_ocr()
-            code = jwxt_client.ocr.classification(image_data)
+            code = jwxt_client.recognize_captcha(image_data)
         except Exception as e:
             logger.warning(f"验证码OCR识别失败: {e}")
         return jsonify({"success": True, "image": b64, "code": code})
@@ -207,14 +206,14 @@ def overall_status():
             "account": jwxt_client.account,
             "locked": locked,
             "lock_time": lock_time.isoformat() if lock_time else None,
-            "failed_attempts": jwxt_client._failed_attempts,
+            "failed_attempts": jwxt_client.failed_attempts,
         },
         "xiaoai": {
             "cookie_valid": xiaoai_ok,
             "logged_in": xiaoai_speaker.logged_in,
             "login_time": xiaoai_speaker.login_time.isoformat() if xiaoai_speaker.login_time else None,
             "username": xiaoai_speaker.username,
-            "device_id": xiaoai_speaker._device_id_cache or xiaoai_speaker.device_id,
+            "device_id": xiaoai_speaker.device_id,
         },
     })
 
