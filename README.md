@@ -80,10 +80,9 @@ LIT/
 ├── conftest.py           # pytest 根配置（sys.path 锚定 + 目录隔离）
 ├── lit/                  # 统一业务包
 │   ├── config/           # 配置域：环境变量加载与默认值
+│   │   ├── __init__.py   #   通用配置（调度/路径/日志）+ 13 属性汇总导出
 │   │   ├── jwxt.py       #   教务系统配置（地址/账号/学期代码）
-│   │   ├── xiaoai.py     #   小爱音箱配置（TTS 备用地址）
-│   │   ├── schedule.py   #   调度配置（提醒提前量/课程时间表）
-│   │   └── paths.py      #   路径配置（BASE_DIR/DATA_DIR/CACHE_DIR）
+│   │   └── xiaoai.py     #   小爱音箱配置（TTS 地址）
 │   ├── jwxt/             # 教务系统域（门面 + 5 领域模块）
 │   │   ├── client.py     #   JWXTClient 门面（对外唯一接口）
 │   │   ├── auth.py       #   登录与验证码 OCR
@@ -114,7 +113,7 @@ LIT/
 
 | 模块 | 职责 |
 |------|------|
-| `lit/config/` | 环境变量加载与默认值，按 jwxt / xiaoai / schedule / paths 四域拆分 |
+| `lit/config/` | 环境变量加载与默认值：jwxt / xiaoai 两域文件 + `__init__.py` 通用配置（调度/路径/日志）与 13 属性汇总导出 |
 | `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 5 个领域模块 |
 | `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
 | `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、课前 30 分钟提醒 |
