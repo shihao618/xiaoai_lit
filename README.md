@@ -32,15 +32,27 @@
 
 ## 快速开始
 
+### 一键安装（Docker）
+
+```bash
+git clone https://github.com/shihao618/xiaoai_lit.git && cd xiaoai_lit && docker compose up -d --build
+```
+
+启动后打开 `http://localhost:5000` 完成后续配置（教务账号 + 扫码绑定音箱）。
+
 ### 1. 配置教务系统账号
 
-编辑 `docker-compose.yml`，填入教务系统账号（`JWXT_ACCOUNT` / `JWXT_PASSWORD`）。
+编辑 `docker-compose.yml`，填入教务系统账号（`JWXT_ACCOUNT` / `JWXT_PASSWORD`），然后重启容器：
+
+```bash
+docker compose restart
+```
 
 ### 2. 构建并启动
 
 ```bash
 # Docker（推荐）
-docker-compose up -d --build
+docker compose up -d --build
 
 # 或本地直接运行
 python main.py
@@ -65,8 +77,8 @@ docker-compose logs -f
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
 | `JWXT_BASE_URL` | `https://lljw.lit.edu.cn` | 教务系统地址 |
-| `JWXT_ACCOUNT` | `your_student_id` | 教务系统账号 |
-| `JWXT_PASSWORD` | `your_password` | 教务系统密码 |
+| `JWXT_ACCOUNT` | -（必填） | 教务系统账号 |
+| `JWXT_PASSWORD` | -（必填） | 教务系统密码 |
 | `XNXQDM` | `202601` | 学年学期代码 |
 | `XIAOAI_TTS_BACKUP_URL` | - | TTS 被拒时的备用音频 URL（可选） |
 | `REMIND_BEFORE_MINUTES` | `30` | 提前提醒分钟数 |
