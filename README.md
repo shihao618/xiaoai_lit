@@ -24,20 +24,6 @@
 - **手动配置**：页面教务配置区"学期锚点配置"可直接填写第 1 教学周周一（仅周一合法，如 `2026-09-07`），手动值优先于自动探测
 - 学期切换后（学年学期代码变化）旧锚点自动失效，下次刷新重新探测；探测失败不阻断课表刷新（回退仅按星期过滤，宁可多提醒不可停提醒）
 
-## 上课时间表（来自教务系统）
-
-| 节次 | 开始时间 | 结束时间 |
-|------|---------|---------|
-| 第1节 | 08:00 | 08:45 |
-| 第2节 | 08:55 | 09:40 |
-| 第3节 | 10:00 | 10:45 |
-| 第4节 | 10:55 | 11:40 |
-| 第5节 | 14:30 | 15:15 |
-| 第6节 | 15:25 | 16:10 |
-| 第7节 | 16:30 | 17:15 |
-| 第8节 | 17:25 | 18:10 |
-| 第9节 | 19:10 | 19:55 |
-| 第10节 | 20:05 | 20:50 |
 
 ## 快速开始
 
@@ -73,7 +59,7 @@ python main.py
 2. 点击"扫码登录"，用小米手机（已绑定小爱音箱的账号）扫描页面二维码并确认
 3. 登录成功后页面自动展示设备列表，选择目标音箱即可
 
-无需输入小米账号密码，也无需短信验证码。若扫码不便，也可在页面"手动设置"中填入 Cookie 或 Token（兜底方式）。
+无需输入小米账号密码，也无需短信验证码。
 
 ### 4. 查看日志
 
@@ -125,9 +111,9 @@ LIT/
 │   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒/TTS 清理）
 │   └── web/              # Web 层
 │       ├── app.py        #   create_app() 应用工厂（迁移编排 + 对象装配 + 启动后台任务）
-│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（6 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
+│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（7 路由）/ audio（TTS 音频）/ status（聚合状态）
 │       └── templates/    #   前端单页 index.html（随包入镜像）
-├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py + test_tasks_week.py，236 用例）
+├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py + test_tasks_week.py，229 用例）
 ├── Dockerfile / docker-compose.yml / requirements.txt
 ├── cache/                # 缓存卷：cache/jwxt/course_table.json + cache/xiaoai/tts_cache/
 └── data/                 # 数据卷：data/jwxt/jwxt.json（+ jwxt_lock.json）+ data/xiaoai/（凭证）
@@ -144,7 +130,7 @@ LIT/
 | `lit/jwxt/term.py` | 学期锚点与教学周纯函数：锚点解析/有效性校验、教学周推算、单双周双条件过滤、探测反推算法 |
 | `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
 | `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、TTS 缓存清理每日 06:05、课前 30 分钟提醒 |
-| `lit/web/` | Flask 应用工厂与 5 蓝图（共 19 条路由），对象装配与启动时序集中于此 |
+| `lit/web/` | Flask 应用工厂与 5 蓝图（共 15 条路由），对象装配与启动时序集中于此 |
 
 ## 技术细节
 
