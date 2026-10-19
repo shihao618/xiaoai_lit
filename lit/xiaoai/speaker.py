@@ -459,8 +459,7 @@ class XiaoAISpeaker:
         for c in courses:
             name = c.get("name", "未知课程")
             classroom = c.get("classroom", "")
-            section = c.get("section_start", 0)
-            time_str = config.COURSE_TIME_MAP.get(section, "")
+            time_str = (c.get("start_time") or "")[:5]
             if classroom:
                 details.append(f"{time_str} {name}，教室{classroom}")
             else:

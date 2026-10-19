@@ -24,8 +24,7 @@ class BackgroundTasks:
     def refresh_course_table(self):
         logger.info("刷新课表数据...")
         courses = self.jwxt.get_course_table()
-        if courses:
-            self.jwxt.fetch_term_anchor()
+        if courses is not None:
             self.today_courses = self.jwxt.get_today_courses()
             logger.info(f"今日课程: {len(self.today_courses)} 门")
             for c in self.today_courses:
@@ -39,41 +38,31 @@ class BackgroundTasks:
             if job.id.startswith("remind_"):
                 self.scheduler.remove_job(job.id)
 
-        s12 = [c for c in self.today_courses if c.get("section_start", 99) in (1, 2)]
-        s34 = [c for c in self.today_courses if c.get("section_start", 99) in (3, 4)]
-        s56 = [c for c in self.today_courses if c.get("section_start", 99) in (5, 6)]
-        s78 = [c for c in self.today_courses if c.get("section_start", 99) in (7, 8)]
+        morning = [c for c in self.today_courses if c.get("start_time", "99:99") < "12:00:00"]
+        afternoon = [c for c in self.today_courses if c.get("start_time", "") >= "12:00:00"]
 
-        if s12:
-            h, m = self._calc_remind_time(1)
-            self.scheduler.add_job(self._remind_morning, CronTrigger(hour=h, minute=m), id="remind_morning", replace_existing=True)
-            logger.info(f"已设置上午提醒: {h:02d}:{m:02d} (1-2节有课)")
-        elif s34:
-            h, m = self._calc_remind_time(3)
-            self.scheduler.add_job(self._remind_morning, CronTrigger(hour=h, minute=m), id="remind_morning", replace_existing=True)
-            logger.info(f"已设置上午提醒: {h:02d}:{m:02d} (1-2节无课，3-4节有课)")
+        if morning:
+            earliest = min(c.get("start_time", "00:00:00") for c in morning)
+            h, m = map(int, earliest.split(":")[:2])
+            total = max(h * 60 + m - config.REMIND_BEFORE_MINUTES, 0)
+            rh, rm = total // 60, total % 60
+            self.scheduler.add_job(self._remind_morning, CronTrigger(hour=rh, minute=rm), id="remind_morning", replace_existing=True)
+            logger.info(f"已设置上午提醒: {rh:02d}:{rm:02d} (最早课程 {earliest[:5]})")
 
-        if s56:
-            h, m = self._calc_remind_time(5)
-            self.scheduler.add_job(self._remind_afternoon, CronTrigger(hour=h, minute=m), id="remind_afternoon", replace_existing=True)
-            logger.info(f"已设置下午提醒: {h:02d}:{m:02d} (5-6节有课)")
-        elif s78:
-            h, m = self._calc_remind_time(7)
-            self.scheduler.add_job(self._remind_afternoon, CronTrigger(hour=h, minute=m), id="remind_afternoon", replace_existing=True)
-            logger.info(f"已设置下午提醒: {h:02d}:{m:02d} (5-6节无课，7-8节有课)")
-
-    def _calc_remind_time(self, section):
-        time_str = config.COURSE_TIME_MAP.get(section, "08:00")
-        h, m = map(int, time_str.split(":"))
-        total = h * 60 + m - config.REMIND_BEFORE_MINUTES
-        return total // 60, total % 60
+        if afternoon:
+            earliest = min(c.get("start_time", "23:59:59") for c in afternoon)
+            h, m = map(int, earliest.split(":")[:2])
+            total = max(h * 60 + m - config.REMIND_BEFORE_MINUTES, 0)
+            rh, rm = total // 60, total % 60
+            self.scheduler.add_job(self._remind_afternoon, CronTrigger(hour=rh, minute=rm), id="remind_afternoon", replace_existing=True)
+            logger.info(f"已设置下午提醒: {rh:02d}:{rm:02d} (最早课程 {earliest[:5]})")
 
     def _remind_morning(self):
-        morning = [c for c in self.today_courses if c.get("section_start", 99) <= 4]
+        morning = [c for c in self.today_courses if c.get("start_time", "99:99") < "12:00:00"]
         self.speaker.remind_morning(morning)
 
     def _remind_afternoon(self):
-        afternoon = [c for c in self.today_courses if 5 <= c.get("section_start", 99) <= 8]
+        afternoon = [c for c in self.today_courses if c.get("start_time", "") >= "12:00:00"]
         self.speaker.remind_afternoon(afternoon)
 
     def check_jwxt_cookie(self):
@@ -82,9 +71,13 @@ class BackgroundTasks:
         if not valid:
             locked, lock_time = self.jwxt.is_locked()
             if locked:
-                logger.warning(f"教务系统账号锁定/冷却中，解锁时间: {lock_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.warning(f"教务系统账号锁定/冷却中，解锁时间: {lock_time.strftime('%Y-%m-%d %H:%M:%S')}（自动重登已跳过，锁定期零请求）")
+            elif self.jwxt._credentials_invalid:
+                logger.warning("教务系统Cookie失效，凭证疑似失效请人工核对（自动重登已停止）")
+            elif not (self.jwxt.account and self.jwxt.password):
+                logger.warning("教务系统Cookie失效，无可用凭证，请在前端登录页配置账号密码")
             else:
-                logger.warning("教务系统Cookie失效，请在配置页面重新登录")
+                logger.warning("教务系统Cookie失效，自动重登未成功，将在下个检查周期重试；持续失效请在配置页面重新登录")
         return valid
 
     def check_xiaoai_cookie(self):
