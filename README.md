@@ -11,9 +11,18 @@
 
 ## 提醒逻辑
 
+- **周次过滤**：课表区分单双周与部分周课程——仅当课程周次包含当前教学周（或课程为每周上课）才会提醒；学期外日期（未开学/放假）不提醒
 - **上午**：1-2节有课 → 07:30提醒；1-2节无课但3-4节有课 → 09:30提醒
 - **下午**：5-6节有课 → 14:00提醒；5-6节无课但7-8节有课 → 16:00提醒
 - 提醒方式：先播报"叮叮叮叮！上课提醒！"，等待4秒后播报课程详情（课程名称+教室）
+
+## 学期锚点（周次过滤）
+
+系统需要知道本学期**第 1 教学周周一**的日期，才能推算当前教学周次：
+
+- **自动探测**：每日课表刷新时若锚点缺失，系统附加查询指定周次课表（每条课程含实际上课日期），反推学期起始周一（周一校验 + 多数一致投票剔除调课污染 + 换周重试，最多取样 3 个周次），成功后自动持久化
+- **手动配置**：页面教务配置区"学期锚点配置"可直接填写第 1 教学周周一（仅周一合法，如 `2026-09-07`），手动值优先于自动探测
+- 学期切换后（学年学期代码变化）旧锚点自动失效，下次刷新重新探测；探测失败不阻断课表刷新（回退仅按星期过滤，宁可多提醒不可停提醒）
 
 ## 上课时间表（来自教务系统）
 
@@ -101,7 +110,8 @@ LIT/
 │   │   ├── auth.py       #   登录与验证码 OCR
 │   │   ├── lock.py       #   账号锁定与冷却
 │   │   ├── cookies.py    #   Cookie 持久化（jwxt.json cookies 域）
-│   │   ├── state.py      #   合并状态 jwxt.json 唯一读写方（六键 + 原子写）
+│   │   ├── state.py      #   合并状态 jwxt.json 唯一读写方（九键 + 原子写）
+│   │   ├── term.py       #   学期锚点与教学周（解析/推算/周次过滤/探测反推）
 │   │   ├── xnxqdm.py     #   学期代码缓存（jwxt.json xnxqdm 域）
 │   │   └── courses.py    #   课表获取与解析
 │   ├── xiaoai/           # 小爱音箱域（10 模块）
@@ -115,9 +125,9 @@ LIT/
 │   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒/TTS 清理）
 │   └── web/              # Web 层
 │       ├── app.py        #   create_app() 应用工厂（迁移编排 + 对象装配 + 启动后台任务）
-│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
+│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（6 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
 │       └── templates/    #   前端单页 index.html（随包入镜像）
-├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py，196 用例）
+├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py + test_tasks_week.py，236 用例）
 ├── Dockerfile / docker-compose.yml / requirements.txt
 ├── cache/                # 缓存卷：cache/jwxt/course_table.json + cache/xiaoai/tts_cache/
 └── data/                 # 数据卷：data/jwxt/jwxt.json（+ jwxt_lock.json）+ data/xiaoai/（凭证）
@@ -130,10 +140,11 @@ LIT/
 | `lit/config/` | 环境变量加载与默认值：jwxt / xiaoai 两域文件 + `__init__.py` 通用配置（调度/路径/日志）与 13 属性汇总导出 |
 | `lit/layout.py` | 启动迁移编排：旧平铺布局自动搬移至按域分组目录（幂等可重入，失败不阻断启动） |
 | `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 6 个领域模块 |
-| `lit/jwxt/state.py` | 教务合并状态 `data/jwxt/jwxt.json` 唯一读写方：六键结构、读-合并-写、原子落位 |
+| `lit/jwxt/state.py` | 教务合并状态 `data/jwxt/jwxt.json` 唯一读写方：九键结构、读-合并-写、原子落位 |
+| `lit/jwxt/term.py` | 学期锚点与教学周纯函数：锚点解析/有效性校验、教学周推算、单双周双条件过滤、探测反推算法 |
 | `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
 | `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、TTS 缓存清理每日 06:05、课前 30 分钟提醒 |
-| `lit/web/` | Flask 应用工厂与 5 蓝图（共 18 条路由），对象装配与启动时序集中于此 |
+| `lit/web/` | Flask 应用工厂与 5 蓝图（共 19 条路由），对象装配与启动时序集中于此 |
 
 ## 技术细节
 
@@ -143,7 +154,7 @@ LIT/
 - **小爱控制**：自研实现小米扫码登录协议（`/longPolling/loginUrl` 轮询 + serviceToken 换取）与 MiNA `ubus` 接口（TTS 播报 / URL 播放 / 播放状态查询），不依赖第三方 mi-service 库
 - **定时调度**：使用 `APScheduler` 实现cron定时任务（课表刷新 06:00、TTS 缓存清理 06:05，错峰执行）
 - **课表缓存**：JSON格式缓存到 `cache/jwxt/course_table.json`，避免频繁登录
-- **教务状态合并**：登录态与学期代码合并于 `data/jwxt/jwxt.json`（扁平六键：cookies / login_time / account / xnxqdm / updated / version），读-合并-写协议保证两域互不覆盖，原子落位防半写
+- **教务状态合并**：登录态、学期代码与学期锚点合并于 `data/jwxt/jwxt.json`（扁平九键：cookies / login_time / account / xnxqdm / updated / version + 锚点域三键 term_start_monday / term_xnxqdm / term_start_source，version 保持 1），读-合并-写协议保证各域互不覆盖，原子落位防半写
 
 ## 注意事项
 
