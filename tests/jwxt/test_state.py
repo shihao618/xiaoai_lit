@@ -1,4 +1,4 @@
-"""教务合并状态组：jwxt.json 六键结构与读-合并-写协议（spec 6.2 条 2 冻结行为）。"""
+"""教务合并状态组：jwxt.json 九键结构与读-合并-写协议（spec 6.2 条 2 冻结行为）。"""
 import json
 import os
 
@@ -33,15 +33,19 @@ def test_read_state_corrupt_returns_empty(isolated_dirs):
     assert state.read_state() == {}
 
 
-def test_update_state_writes_full_six_keys(isolated_dirs):
+def test_update_state_writes_full_nine_keys(isolated_dirs):
     state.update_state({"xnxqdm": "20261", "updated": "2026-10-19T08:00:00"})
     data = read_json(state.state_path())
     assert set(data.keys()) == {
-        "version", "cookies", "login_time", "account", "xnxqdm", "updated"}
+        "version", "cookies", "login_time", "account", "xnxqdm", "updated",
+        "term_start_monday", "term_xnxqdm", "term_start_source"}
     assert data["version"] == 1
     assert data["cookies"] == {}
     assert data["login_time"] is None
     assert data["account"] == ""
+    assert data["term_start_monday"] is None
+    assert data["term_xnxqdm"] == ""
+    assert data["term_start_source"] == ""
 
 
 def test_update_state_merge_preserves_other_domain(isolated_dirs):

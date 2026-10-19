@@ -64,7 +64,13 @@ def test_save_cookies_writes_frozen_structure(isolated_dirs):
     path = os.path.join(isolated_dirs["data"], "jwxt", "jwxt.json")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    assert set(data.keys()) == {"version", "cookies", "login_time", "account", "xnxqdm", "updated"}
+    assert set(data.keys()) == {
+        "version", "cookies", "login_time", "account", "xnxqdm", "updated",
+        "term_start_monday", "term_xnxqdm", "term_start_source",
+    }
+    assert data["term_start_monday"] is None
+    assert data["term_xnxqdm"] == ""
+    assert data["term_start_source"] == ""
     assert data["cookies"] == {"JSESSIONID": "xyz789"}
     assert data["account"] == "u1"
     assert client.cookie_valid is True
