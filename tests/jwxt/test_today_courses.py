@@ -2,9 +2,7 @@
 monkeypatch client 模块 date.today + isolated_dirs 锚点构造 + mock get_course_table 固定课表。
 真实锚点基准：第 1 教学周周一 = 2026-09-07；2026-10-20 周二 = 第 7 教学周（单周）。"""
 import logging
-from datetime import date, timedelta
-
-import pytest
+from datetime import date
 
 from lit.jwxt import state, term
 from lit.jwxt.client import JWXTClient
@@ -80,25 +78,27 @@ def test_out_of_term_returns_empty(isolated_dirs, monkeypatch, caplog):
     assert "学期外日期" in caplog.text
 
 
-def _raw_for_week(n):
-    """构造第 n 教学周查询响应：2 正常票 + 1 调课污染离群票（实际在第 n+2 周上课）。"""
-    monday = ANCHOR + timedelta(weeks=n - 1)
-    return [
-        {"qsrq": (monday + timedelta(days=1)).isoformat()},
-        {"qsrq": (monday + timedelta(days=2)).isoformat()},
-        {"qsrq": (monday + timedelta(weeks=2, days=1)).isoformat()},
-    ]
+_CAL_GRID = {
+    "code": 0,
+    "data": [[
+        [{"type": "head", "value": "周次"},
+         {"type": "xq", "value": "一", "fullText": "星期一"}],
+        [{"type": "zc", "value": "1", "fullText": "第1周"},
+         {"type": "day", "value": "7", "fullText": "2026-09-07",
+          "month": "2026-09", "zt": "1", "bz": "", "dm": "0"}],
+    ]],
+    "message": "",
+}
 
 
-def test_probe_success_then_filter_uses_new_anchor(isolated_dirs, monkeypatch, caplog):
-    """探测链路：多数反推（2 正常票压 1 离群票）→ auto 落盘 → 当次判定采用新锚点。"""
+def test_fetch_anchor_success_then_filter_uses_new_anchor(isolated_dirs, monkeypatch, caplog):
+    """校历直取：标准网格解析 → auto 落盘 → 当次判定采用新锚点。"""
     client = _make_client(monkeypatch, date(2026, 10, 20))
-    monkeypatch.setattr(client, "_fetch_week_raw", lambda n: _raw_for_week(n))
+    monkeypatch.setattr(client, "_fetch_calendar", lambda: _CAL_GRID)
     with caplog.at_level(logging.INFO, logger="lit.jwxt.client"):
-        assert client.ensure_term_anchor(COURSES) is True
-        assert "锚点探测成功" in caplog.text
-        assert "票数 2/3" in caplog.text
-    data = __import__("lit.jwxt.state", fromlist=["read_state"]).read_state()
+        assert client.fetch_term_anchor() is True
+        assert "锚点校历直取" in caplog.text
+    data = state.read_state()
     assert data["term_start_monday"] == "2026-09-07"
     assert data["term_xnxqdm"] == XNXQDM
     assert data["term_start_source"] == "auto"
@@ -106,13 +106,13 @@ def test_probe_success_then_filter_uses_new_anchor(isolated_dirs, monkeypatch, c
     assert [c["name"] for c in result] == ["单周课", "每周课", "旧缓存无weeks键"]
 
 
-def test_ensure_anchor_skips_when_valid(isolated_dirs, monkeypatch):
-    """幂等跳过：有效锚点存在 → ensure_term_anchor True 且零探测请求。"""
+def test_fetch_anchor_skips_when_valid(isolated_dirs, monkeypatch):
+    """幂等跳过：有效锚点存在 → fetch_term_anchor True 且零校历请求。"""
     term.save_anchor(ANCHOR, XNXQDM, "manual")
     client = _make_client(monkeypatch, date(2026, 10, 20))
 
-    def _boom(n):
-        raise AssertionError("有效锚点存在时不应发起探测请求")
+    def _boom():
+        raise AssertionError("有效锚点存在时不应发起校历请求")
 
-    monkeypatch.setattr(client, "_fetch_week_raw", _boom)
-    assert client.ensure_term_anchor(COURSES) is True
+    monkeypatch.setattr(client, "_fetch_calendar", _boom)
+    assert client.fetch_term_anchor() is True
