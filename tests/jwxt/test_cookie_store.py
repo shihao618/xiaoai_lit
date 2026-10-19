@@ -1,13 +1,15 @@
-"""Cookie 加载组：jwxt_cookies.json 持久化与账号匹配（spec 6.2 条 1 冻结行为）。"""
+"""Cookie 加载组：jwxt.json cookies 域持久化与账号匹配（spec 6.2 条 1 冻结行为）。"""
 import json
 import os
 from datetime import datetime
 
-from lit.jwxt import JWXTClient, cookies
+from lit.jwxt import JWXTClient, cookies, xnxqdm
 
 
 def write_cookies(data_dir, payload):
-    path = os.path.join(data_dir, "jwxt_cookies.json")
+    jwxt_dir = os.path.join(data_dir, "jwxt")
+    os.makedirs(jwxt_dir, exist_ok=True)
+    path = os.path.join(jwxt_dir, "jwxt.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
     return path
@@ -46,7 +48,9 @@ def test_load_missing_file_fresh_state(isolated_dirs):
 
 
 def test_load_corrupt_json_warns_not_raises(isolated_dirs):
-    path = os.path.join(isolated_dirs["data"], "jwxt_cookies.json")
+    jwxt_dir = os.path.join(isolated_dirs["data"], "jwxt")
+    os.makedirs(jwxt_dir)
+    path = os.path.join(jwxt_dir, "jwxt.json")
     with open(path, "w", encoding="utf-8") as f:
         f.write("{not valid json")
     client = JWXTClient(account="u1", password="p1")
@@ -57,10 +61,10 @@ def test_save_cookies_writes_frozen_structure(isolated_dirs):
     client = JWXTClient(account="u1", password="p1")
     client.session.cookies.set("JSESSIONID", "xyz789")
     cookies._save_cookies(client)
-    path = os.path.join(isolated_dirs["data"], "jwxt_cookies.json")
+    path = os.path.join(isolated_dirs["data"], "jwxt", "jwxt.json")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    assert set(data.keys()) == {"cookies", "login_time", "account"}
+    assert set(data.keys()) == {"version", "cookies", "login_time", "account", "xnxqdm", "updated"}
     assert data["cookies"] == {"JSESSIONID": "xyz789"}
     assert data["account"] == "u1"
     assert client.cookie_valid is True
@@ -74,3 +78,18 @@ def test_save_then_reload_roundtrip(isolated_dirs):
     reloaded = JWXTClient(account="u1", password="p1")
     assert reloaded.cookie_valid is True
     assert reloaded.session.cookies.get("JSESSIONID") == "rt01"
+
+
+def test_cookies_and_xnxqdm_domains_not_overwritten(isolated_dirs):
+    client = JWXTClient(account="u1", password="p1")
+    client.session.cookies.set("JSESSIONID", "rt02")
+    cookies._save_cookies(client)
+    client.xnxqdm = "20261"
+    xnxqdm._save_xnxqdm(client)
+    path = os.path.join(isolated_dirs["data"], "jwxt", "jwxt.json")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["cookies"] == {"JSESSIONID": "rt02"}
+    assert data["account"] == "u1"
+    assert data["xnxqdm"] == "20261"
+    assert data["login_time"] is not None

@@ -9,7 +9,7 @@ from lit.xiaoai import tts
 
 @pytest.fixture
 def tts_env(tmp_path, monkeypatch):
-    monkeypatch.setattr("lit.config.DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("lit.config.CACHE_DIR", str(tmp_path))
     monkeypatch.setattr("lit.config.XIAOAI_TTS_BASE_URL", "http://192.168.0.9:5000")
     return tmp_path
 
@@ -112,3 +112,23 @@ def test_silence_file_stable_and_kept_by_clear_cache(tts_env):
             f.write(b"\x00" * 10)
     tts.clear_cache(max_files=1)
     assert os.path.isfile(path)  # 静音垫底文件不被淘汰
+
+def test_cache_dir_anchored_to_cache_volume(tts_env):
+    assert tts.cache_dir() == os.path.join(str(tts_env), "xiaoai", "tts_cache")
+
+
+def test_purge_cache_deletes_all_but_silence(tts_env):
+    d = tts.cache_dir()
+    for i in range(3):
+        with open(os.path.join(d, f"f{i}.mp3"), "wb") as f:
+            f.write(b"\x00" * (100 * (i + 1)))
+    silence = tts.silence_file()
+    count, size = tts.purge_cache()
+    assert count == 3
+    assert size == 100 + 200 + 300
+    assert os.listdir(d) == [silence]
+    assert os.path.isdir(d)
+
+
+def test_purge_cache_empty_returns_zero(tts_env):
+    assert tts.purge_cache() == (0, 0)

@@ -95,7 +95,7 @@ def test_login_lock_message_takes_priority(isolated_dirs, monkeypatch):
 def test_lock_persistence_roundtrip(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
     _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
-    assert os.path.exists(os.path.join(isolated_dirs["data"], "jwxt_lock.json"))
+    assert os.path.exists(os.path.join(isolated_dirs["data"], "jwxt", "jwxt_lock.json"))
     restored = JWXTClient(account="u1", password="p1")
     assert restored._failed_attempts == MAX_FAILED_ATTEMPTS
     locked, _ = restored.is_locked()
@@ -123,7 +123,7 @@ def test_lock_persistence_expired_not_restored(isolated_dirs, monkeypatch):
 def test_clear_lock_removes_file(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
     _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
-    lock_file = os.path.join(isolated_dirs["data"], "jwxt_lock.json")
+    lock_file = os.path.join(isolated_dirs["data"], "jwxt", "jwxt_lock.json")
     assert os.path.exists(lock_file)
     lock._clear_lock(client)
     assert not os.path.exists(lock_file)

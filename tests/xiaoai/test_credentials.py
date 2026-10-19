@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 
 from lit.xiaoai.credentials import CredentialStore, Credentials
@@ -137,3 +138,8 @@ def test_atomic_write_no_tmp_left(tmp_path):
     data = json.loads(
         (tmp_path / "xiaoai_credentials.json").read_text(encoding="utf-8"))
     assert data["user_id"] == "2"
+
+def test_default_path_anchors_xiaoai_subdir(isolated_dirs):
+    store = CredentialStore()
+    assert store.path == os.path.join(
+        isolated_dirs["data"], "xiaoai", "xiaoai_credentials.json")
