@@ -202,63 +202,43 @@ class JWXTClient:
             logger.error(f"获取课表异常: {e}")
             return courses._load_cache()
 
-    def ensure_term_anchor(self, course_list: list[dict]) -> bool:
-        """锚点保障入口（tasks 刷新编排唯一调用点）：
-        有效锚点存在 → True（零开销跳过）；缺失 → _probe_term_anchor；
-        整体 try-except 全捕获——探测任何失败不阻断刷新主流程。"""
+    def fetch_term_anchor(self) -> bool:
+        """锚点保障入口（tasks 刷新编排唯一调用点，校历直取版）：
+        有效锚点存在 → True（零请求跳过，手动值优先级天然保证）；
+        缺失 → _fetch_calendar + anchor_from_calendar → save_anchor("auto")；
+        整体 try-except 全捕获——直取任何失败不阻断刷新主流程。"""
         try:
             if term.get_effective_anchor(self.xnxqdm) is not None:
                 return True
-            return self._probe_term_anchor(course_list)
-        except Exception as e:
-            logger.warning(f"学期锚点保障异常（不影响刷新主流程）: {e}")
-            return False
-
-    def _probe_term_anchor(self, course_list: list[dict]) -> bool:
-        """取样周次（前 3 个有课小周次）逐周探测：查询 → 反推校验 →
-        成功即 save_anchor(source="auto") 并记探测依据日志；全部失败返回 False。"""
-        weeks = term.available_probe_weeks(course_list)
-        if not weeks:
-            logger.warning("课表无周次数据，无法探测学期锚点")
-            return False
-        for n in weeks[:term.PROBE_SAMPLE_SIZE]:
-            try:
-                raw = self._fetch_week_raw(n)
-            except Exception as e:
-                logger.warning(f"锚点探测请求失败(第 {n} 周): {e}")
-                continue
-            votes = term._vote_anchor(raw, n)
-            anchor = term.anchor_from_week_response(raw, n)
+            response = self._fetch_calendar()
+            anchor = term.anchor_from_calendar(response)
             if anchor is None:
-                logger.warning(f"第 {n} 周数据未通过多数一致校验")
-                continue
+                logger.warning("学期锚点校历直取失败（不影响刷新主流程）: "
+                               "校历响应无有效第 1 周行/非周一/格式异常")
+                return False
             term.save_anchor(anchor, self.xnxqdm, "auto")
-            total = sum(votes.values())
-            logger.info(
-                f"锚点探测成功: 第1教学周周一={anchor.isoformat()}"
-                f"（取样第 {n} 周, 票数 {votes[anchor]}/{total}）")
+            logger.info(f"锚点校历直取: {anchor.isoformat()}（学期 {self.xnxqdm}）")
             return True
-        logger.warning("锚点探测放弃（本次刷新），下次刷新重试")
-        return False
+        except Exception as e:
+            logger.warning(f"学期锚点校历直取失败（不影响刷新主流程）: {e}")
+            return False
 
-    def _fetch_week_raw(self, week_n: int) -> list[dict]:
-        """指定周次 POST getCalendarWeekDatas（zc=str(week_n)，其余参数与
-        get_course_table 完全一致，timeout=15）；code<0 抛 ValueError，
-        网络异常自然上抛——均由 _probe_term_anchor 捕获换周。
-        返回 data 数组原貌（含 qsrq 日期字段，不经过 parse_courses）。"""
-        self.session.headers.update({
-            "Referer": f"{self.base_url}/new/student/xsgrkb/week.page?xnxqdm={self.xnxqdm}",
-            "X-Requested-With": "XMLHttpRequest",
-        })
+    def _fetch_calendar(self) -> dict:
+        """POST /new/xlxx/data 查询学期校历（form 体 xnxqdm，请求级 headers
+        含 X-Requested-With——缺失时服务端返回 HTML 页面，timeout=15）；
+        code<0 抛 ValueError，网络异常自然上抛——均由上层调用方
+        全捕获。返回完整响应 dict（网格解析归 term.anchor_from_calendar）。"""
         resp = self.session.post(
-            f"{self.base_url}/new/student/xsgrkb/getCalendarWeekDatas",
-            data={"xnxqdm": self.xnxqdm, "zc": str(week_n), "szxqdm": "", "yxdm": ""},
+            f"{self.base_url}/new/xlxx/data",
+            data={"xnxqdm": self.xnxqdm},
+            headers={"X-Requested-With": "XMLHttpRequest",
+                     "Referer": f"{self.base_url}/new/student/xlxx/xlxxlist.page"},
             timeout=15,
         )
         result = resp.json()
         if result.get("code", -1) < 0:
-            raise ValueError(f"课表周次查询失败: {result.get('message')}")
-        return result.get("data", [])
+            raise ValueError(f"校历查询失败: {result.get('message')}")
+        return result
 
     def get_today_courses(self):
         course_list = self.get_course_table()
@@ -275,7 +255,7 @@ class JWXTClient:
             logger.info(f"当前第 {week} 周（锚点 {anchor.isoformat()}，学期 {self.xnxqdm}）")
             today_courses = term.filter_today(course_list, today_weekday, week)
         else:
-            logger.warning("学期锚点未生效，周次过滤未启用（仅按星期过滤；等待探测或手动配置）")
+            logger.warning("学期锚点未生效，周次过滤未启用（仅按星期过滤；等待校历直取或手动配置）")
             today_courses = [c for c in course_list if c.get("day") == today_weekday]
         today_courses.sort(key=lambda x: x.get("section_start", 0))
         return today_courses
