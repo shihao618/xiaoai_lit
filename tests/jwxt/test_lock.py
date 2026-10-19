@@ -63,7 +63,8 @@ def test_is_locked_expired_returns_false(isolated_dirs):
 
 
 def _drive_failures(client, monkeypatch, message, attempts):
-    monkeypatch.setattr("lit.jwxt.auth._get_captcha_ocr", lambda c: "abcd")
+    monkeypatch.setattr("lit.jwxt.api.login.recognize_captcha", lambda image: "abcd")
+    monkeypatch.setattr(client, "get_captcha_image", lambda: b"fake-captcha")
     monkeypatch.setattr(client.session, "post",
                         lambda *a, **k: StubResponse({"code": -1, "message": message}))
     return client.login(verifycode="wxyz", max_retries=attempts)
