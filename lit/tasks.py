@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from lit import config
+from lit.xiaoai import tts
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,14 @@ class BackgroundTasks:
         self.check_jwxt_cookie()
         self.check_xiaoai_cookie()
 
+    def _purge_tts_cache(self):
+        try:
+            logger.info("开始清理TTS缓存...")
+            count, size = tts.purge_cache()
+            logger.info("TTS缓存清理完成: 删除 %d 个文件 / %d 字节", count, size)
+        except Exception as e:
+            logger.error(f"TTS缓存清理任务异常: {e}")
+
     def start(self):
         self.scheduler.add_job(
             self.refresh_all,
@@ -117,6 +126,13 @@ class BackgroundTasks:
         self.refresh_course_table()
         self.scheduler.add_job(self.refresh_course_table, CronTrigger(hour=6, minute=0), id="refresh_daily", replace_existing=True)
         logger.info("已设置每日06:00刷新课表")
+        self.scheduler.add_job(
+            self._purge_tts_cache,
+            CronTrigger(hour=6, minute=5),
+            id="tts_cache_cleanup",
+            replace_existing=True,
+        )
+        logger.info("已设置每日06:05清理TTS缓存")
 
     def stop(self):
         self.scheduler.shutdown()

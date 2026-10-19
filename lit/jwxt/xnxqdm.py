@@ -1,39 +1,28 @@
-"""学期代码：抓取（两条正则）与 jwxt_xnxqdm.json 缓存（语义等价自根 jwxt.py）。"""
-import json
+"""学期代码：抓取（两条正则）与 jwxt.json xnxqdm 域缓存（语义等价自根 jwxt.py）。"""
 import logging
-import os
 import re
 from datetime import datetime
 
-from lit import config
+from lit.jwxt import state
 
 logger = logging.getLogger(__name__)
 
 
-def _xnxqdm_file():
-    return os.path.join(config.DATA_DIR, "jwxt_xnxqdm.json")
-
-
 def _save_xnxqdm(client):
     try:
-        os.makedirs(config.DATA_DIR, exist_ok=True)
-        with open(_xnxqdm_file(), "w", encoding="utf-8") as f:
-            json.dump({"xnxqdm": client.xnxqdm, "updated": datetime.now().isoformat()}, f)
+        state.update_state({"xnxqdm": client.xnxqdm, "updated": datetime.now().isoformat()})
     except Exception as e:
         logger.warning(f"保存学期代码失败: {e}")
 
 
 def _load_xnxqdm(client):
-    f = _xnxqdm_file()
-    if os.path.exists(f):
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            client.xnxqdm = data.get("xnxqdm", "")
-            if client.xnxqdm:
-                logger.info(f"加载缓存学期代码: {client.xnxqdm}")
-        except Exception as e:
-            logger.warning(f"加载学期代码失败: {e}")
+    try:
+        data = state.read_state()
+        client.xnxqdm = data.get("xnxqdm", "")
+        if client.xnxqdm:
+            logger.info(f"加载缓存学期代码: {client.xnxqdm}")
+    except Exception as e:
+        logger.warning(f"加载学期代码失败: {e}")
 
 
 def _fetch_xnxqdm(client):

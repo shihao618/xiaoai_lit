@@ -26,7 +26,7 @@ _SILENCE_FRAME_MS = 24
 
 
 def cache_dir() -> str:
-    path = os.path.join(config.DATA_DIR, _CACHE_SUBDIR)
+    path = os.path.join(config.CACHE_DIR, "xiaoai", _CACHE_SUBDIR)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -150,3 +150,31 @@ def clear_cache(max_files: int = 200) -> None:
             os.remove(old)
         except OSError:
             pass
+
+def purge_cache() -> tuple:
+    """每日全量清理合成缓存：删除目录内全部 *.mp3（豁免 silence30.mp3）。
+
+    返回 (删除文件数, 释放字节数)；目录不存在返回 (0, 0)；
+    单文件删除失败计数汇总记日志，不中断其余文件。
+    """
+    path = cache_dir()
+    count = 0
+    size = 0
+    failed = 0
+    try:
+        names = [n for n in os.listdir(path) if n.endswith(".mp3") and n != SILENCE_FILENAME]
+    except OSError:
+        return 0, 0
+    for name in names:
+        p = os.path.join(path, name)
+        try:
+            s = os.path.getsize(p)
+            os.remove(p)
+        except OSError:
+            failed += 1
+            continue
+        count += 1
+        size += s
+    if failed:
+        logger.warning("TTS缓存清理有 %d 个文件删除失败", failed)
+    return count, size

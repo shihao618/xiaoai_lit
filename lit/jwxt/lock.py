@@ -14,12 +14,12 @@ COOLDOWN_MINUTES = 30
 
 
 def _lock_file():
-    return os.path.join(config.DATA_DIR, "jwxt_lock.json")
+    return os.path.join(config.DATA_DIR, "jwxt", "jwxt_lock.json")
 
 
 def _save_lock(client):
     try:
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(_lock_file()), exist_ok=True)
         data = {
             "account": client.account,
             "lock_until": (client._lock_until or client._cooldown_until).isoformat() if (client._lock_until or client._cooldown_until) else None,

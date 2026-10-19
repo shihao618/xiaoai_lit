@@ -16,6 +16,8 @@ MI_TOKEN_FILENAME = "mi.token"
 XIAOAI_COOKIES_FILENAME = "xiaoai_cookies.json"
 XIAOAI_TOKEN_FILENAME = "xiaoai_token.json"
 
+_XIAOAI_SUBDIR = "xiaoai"
+
 
 @dataclass
 class Credentials:
@@ -36,7 +38,7 @@ class CredentialStore:
     """凭证持久化：data/xiaoai_credentials.json，snake_case 键、UTF-8、原子写。"""
 
     def __init__(self, data_dir: Optional[str] = None):
-        self._data_dir = data_dir or config.DATA_DIR
+        self._data_dir = data_dir or os.path.join(config.DATA_DIR, _XIAOAI_SUBDIR)
 
     @property
     def path(self) -> str:

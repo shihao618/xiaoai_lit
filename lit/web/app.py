@@ -20,10 +20,12 @@ logger = logging.getLogger(__name__)
 def create_app():
     os.makedirs(config.DATA_DIR, exist_ok=True)
     os.makedirs(config.CACHE_DIR, exist_ok=True)
+    from lit import layout
+    layout.run_startup_migration()
     jwxt_client = JWXTClient()
     xiaoai_speaker = XiaoAISpeaker()
     tasks = BackgroundTasks(jwxt_client, xiaoai_speaker)
-    app = Flask(__name__, template_folder=os.path.join(config.BASE_DIR, "templates"), static_folder=None)
+    app = Flask(__name__, template_folder="templates", static_folder=None)
     app.register_blueprint(create_pages_blueprint())
     app.register_blueprint(create_jwxt_blueprint(jwxt_client))
     app.register_blueprint(create_xiaoai_blueprint(xiaoai_speaker))

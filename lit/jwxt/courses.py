@@ -29,15 +29,18 @@ def parse_courses(raw_courses):
     return courses
 
 
+def _cache_file():
+    return os.path.join(config.CACHE_DIR, "jwxt", "course_table.json")
+
+
 def _save_cache(courses):
-    os.makedirs(config.CACHE_DIR, exist_ok=True)
-    cache_file = os.path.join(config.CACHE_DIR, "course_table.json")
-    with open(cache_file, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(_cache_file()), exist_ok=True)
+    with open(_cache_file(), "w", encoding="utf-8") as f:
         json.dump({"updated": datetime.now().isoformat(), "courses": courses}, f, ensure_ascii=False, indent=2)
 
 
 def _load_cache():
-    cache_file = os.path.join(config.CACHE_DIR, "course_table.json")
+    cache_file = _cache_file()
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
             data = json.load(f)
