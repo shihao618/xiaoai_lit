@@ -1,4 +1,4 @@
-"""教务系统蓝图：/api/jwxt/* 6 条路由（契约冻结自 app.py + Q4 显式扩展 term_config）。"""
+"""教务系统蓝图：/api/jwxt/* 5 条路由（契约冻结自 app.py + Q4 显式扩展 term_config）。"""
 import base64
 import logging
 from datetime import date
@@ -46,19 +46,6 @@ def create_jwxt_blueprint(jwxt_client):
     def status():
         return jsonify(jwxt_client.get_status())
 
-    @bp.route("/manual_cookie", methods=["POST"])
-    def manual_cookie():
-        data = request.json or {}
-        cookie_str = data.get("cookie", "").strip()
-        account = data.get("account", "").strip()
-        if not cookie_str:
-            return jsonify({"success": False, "message": "Cookie不能为空"})
-        try:
-            jwxt_client.set_manual_cookie(cookie_str, account or None)
-            return jsonify({"success": True, "message": "Cookie设置成功"})
-        except Exception as e:
-            logger.error(f"手动设置Cookie失败: {e}")
-            return jsonify({"success": False, "message": f"设置失败: {e}"})
 
     @bp.route("/courses")
     def courses():

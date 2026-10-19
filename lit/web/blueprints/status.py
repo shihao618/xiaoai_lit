@@ -1,7 +1,5 @@
-"""综合状态蓝图：/api/status 与 /api/course_time_map（契约冻结自 app.py）。"""
+"""综合状态蓝图：/api/status（契约冻结自 app.py）。"""
 from flask import Blueprint, jsonify
-
-from lit import config
 
 
 def create_status_blueprint(jwxt_client, xiaoai_speaker):
@@ -31,8 +29,5 @@ def create_status_blueprint(jwxt_client, xiaoai_speaker):
             },
         })
 
-    @bp.route("/course_time_map")
-    def course_time_map():
-        return jsonify(config.COURSE_TIME_MAP)
 
     return bp

@@ -48,9 +48,7 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 .course-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
 .course-table th, .course-table td { padding: 8px 12px; border: 1px solid #eee; text-align: left; font-size: 13px; }
 .course-table th { background: #f8f9fa; font-weight: 600; }
-.time-map { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
-.time-item { padding: 8px; border: 1px solid #eee; border-radius: 6px; text-align: center; font-size: 12px; }
-.time-item .section { font-weight: 600; color: #1a73e8; }
+
 .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #ddd; border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .hidden { display: none; }
@@ -65,6 +63,8 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 <div class="card">
 <h2><span class="icon" style="background:#e8f0fe;color:#1a73e8">教</span>教务系统登录 <span id="jwxt-badge" class="status-badge status-warn">未登录</span><span id="term-week-badge" class="status-badge status-warn">周次未启用</span></h2>
 <div id="jwxt-alert"></div>
+<details id="jwxt-login-collapse" open>
+<summary style="cursor:pointer;font-size:14px;color:#666">教务登录（账号 / 密码 / 验证码）</summary>
 <div class="form-group">
 <label>账号</label>
 <input type="text" id="jwxt-account" placeholder="学号">
@@ -84,19 +84,11 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 <button class="btn btn-primary" onclick="jwxtLogin()">登录</button>
 <button class="btn btn-secondary" onclick="loadCaptcha()">刷新验证码</button>
 </div>
+</details>
 
 <div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px">
 <details>
-<summary style="cursor:pointer;font-size:14px;color:#666">手动填入Cookie（登录失败时使用）</summary>
-<div class="alert alert-info" style="margin-top:8px">在浏览器中登录 <a href="https://lljw.lit.edu.cn" target="_blank">lljw.lit.edu.cn</a>，按F12打开开发者工具 → Network → 任意请求 → Headers → Cookie，复制完整值粘贴到下方。</div>
-<div class="form-group">
-<label>Cookie字符串</label>
-<textarea id="jwxt-manual-cookie" rows="3" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:monospace;resize:vertical" placeholder="JSESSIONID=xxx; other=yyy"></textarea>
-</div>
-<button class="btn btn-secondary" onclick="jwxtManualCookie()">设置Cookie</button>
-</details>
 
-<details>
 <summary style="cursor:pointer;font-size:14px;color:#666">学期锚点配置（单双周过滤）</summary>
 <div class="alert alert-info" style="margin-top:8px">设置本学期<strong>第 1 教学周周一</strong>的日期（仅周一合法）。设置后按教学周次过滤单双周课程；不设置时系统会在课表刷新时自动探测。</div>
 <div class="form-group">
@@ -125,34 +117,6 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 <div id="device-list" class="device-list"></div>
 </div>
 
-<div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px">
-<details>
-<summary style="cursor:pointer;font-size:14px;color:#666">手动填入Cookie / Token（登录失败时使用）</summary>
-<div class="alert alert-info" style="margin-top:8px">
-<strong>推荐方法</strong>：浏览器访问 <a href="https://mina.mi.com" target="_blank">mina.mi.com</a>（小爱音箱管理页），登录小米账号后，按F12 → Application → Cookies → 找到 <code>api2.mina.mi.com</code> 域名，复制 <code>userId</code> 和 <code>serviceToken</code> 的值，组成 <code>userId=xxx; serviceToken=xxx</code> 粘贴到下方。<br>
-<span style="color:#999;font-size:12px">注意：必须从 api2.mina.mi.com 域名的 Cookie 中获取，不是 account.xiaomi.com。</span>
-</div>
-<div class="form-group">
-<label>小米账号备注名（可选，用于状态显示）</label>
-<input type="text" id="xiaoai-username" placeholder="小米账号（可选）">
-</div>
-<div class="form-group">
-<label>Cookie字符串（从浏览器复制）</label>
-<textarea id="xiaoai-manual-cookie" rows="3" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:monospace;resize:vertical" placeholder="userId=xxx; serviceToken=xxx; ..."></textarea>
-</div>
-<button class="btn btn-secondary" onclick="xiaoaiManualCookie()">设置Cookie</button>
-<div style="margin-top:12px;font-size:12px;color:#999">或使用 userId + passToken（从 account.xiaomi.com Cookie获取）：</div>
-<div class="form-group" style="margin-top:4px">
-<label>userId</label>
-<input type="text" id="xiaoai-user-id" placeholder="从浏览器Cookie中获取userId">
-</div>
-<div class="form-group">
-<label>passToken</label>
-<input type="text" id="xiaoai-service-token" placeholder="从浏览器Cookie中获取passToken">
-</div>
-<button class="btn btn-secondary" onclick="xiaoaiManualToken()">设置Token</button>
-</details>
-</div>
 </div>
 
 <div class="card">
@@ -162,11 +126,7 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 </div>
 
 <div class="card">
-<h2><span class="icon" style="background:#f1f3f4;color:#666">时</span>上课时间表</h2>
-<div id="time-map" class="time-map"></div>
-</div>
 
-<div class="card">
 <h2><span class="icon" style="background:#fce8e6;color:#c5221f">测</span>播报测试</h2>
 <div class="form-group">
 <label>测试文字</label>
@@ -197,10 +157,21 @@ if (!msg) { el.innerHTML = ''; return; }
 el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
 }
 
+let jwxtFormLastActive = null;
+
+function applyJwxtCollapse(active) {
+const el = document.getElementById('jwxt-login-collapse');
+if (jwxtFormLastActive === null || active !== jwxtFormLastActive) {
+el.open = !active;
+}
+jwxtFormLastActive = active;
+}
+
 async function loadStatus() {
 const s = await api('/api/status');
 setBadge('jwxt-badge', s.jwxt.cookie_valid, s.jwxt.cookie_valid ? '已登录' : (s.jwxt.locked ? '已锁定' : '未登录'));
 setBadge('xiaoai-badge', s.xiaoai.cookie_valid, s.xiaoai.cookie_valid ? '已登录' : '未登录');
+applyJwxtCollapse(s.jwxt.cookie_valid && !s.jwxt.locked);
 
 const ga = document.getElementById('global-alerts');
 let alerts = '';
@@ -214,7 +185,7 @@ if (!s.xiaoai.cookie_valid && s.xiaoai.username) alerts += `<div class="alert al
 ga.innerHTML = alerts;
 
 if (s.jwxt.account) document.getElementById('jwxt-account').value = s.jwxt.account;
-if (s.xiaoai.username) document.getElementById('xiaoai-username').value = s.xiaoai.username;
+
 if (s.xiaoai.device_id) selectedDeviceId = s.xiaoai.device_id;
 return s;
 }
@@ -351,28 +322,28 @@ showAlert('xiaoai-alert', 'success', '设备已选择');
 
 async function loadCourses() {
 document.getElementById('course-preview').innerHTML = '<div class="loading"></div> 正在获取课表...';
-const r = await api('/api/jwxt/courses');
-if (r.success && r.courses) {
- let html = '<table class="course-table"><tr><th>星期</th><th>周次</th><th>节次</th><th>时间</th><th>课程</th><th>教室</th><th>教师</th></tr>';
- const dayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
- r.courses.forEach(c => {
- html += `<tr><td>${dayNames[c.day]||c.day}</td><td>${c.week_str||'每周'}</td><td>${c.section_start}-${c.section_end}</td><td>${(c.start_time||'').slice(0,5)}</td><td>${c.name}</td><td>${c.classroom||''}</td><td>${c.teacher||''}</td></tr>`;
- });
+const [st, r] = await Promise.all([
+api('/api/jwxt/status').catch(() => null),
+api('/api/jwxt/courses').catch(() => null),
+]);
+if (!(r && r.success && r.courses)) {
+document.getElementById('course-preview').innerHTML = '<div class="alert alert-danger">获取课表失败</div>';
+return;
+}
+const enabled = !!(st && st.week_filter_enabled);
+const week = st ? st.current_week : null;
+const courses = r.courses
+.filter(c => c.day >= 1 && c.day <= 5 && (!enabled || !(c.weeks || []).length || (c.weeks || []).includes(week)))
+.sort((a, b) => (a.day - b.day) || (a.section_start - b.section_start));
+let html = '<table class="course-table"><tr><th>星期</th><th>节次</th><th>时间</th><th>课程</th><th>教室</th><th>教师</th></tr>';
+const dayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+courses.forEach(c => {
+html += `<tr><td>${dayNames[c.day]||c.day}</td><td>${c.section_start}-${c.section_end}</td><td>${(c.start_time||'').slice(0,5)}</td><td>${c.name}</td><td>${c.classroom||''}</td><td>${c.teacher||''}</td></tr>`;
+});
 html += '</table>';
 document.getElementById('course-preview').innerHTML = html;
-} else {
-document.getElementById('course-preview').innerHTML = '<div class="alert alert-danger">获取课表失败</div>';
-}
 }
 
-async function loadTimeMap() {
-const r = await api('/api/course_time_map');
-const el = document.getElementById('time-map');
-el.innerHTML = '';
-for (const [section, time] of Object.entries(r)) {
-el.innerHTML += `<div class="time-item"><div class="section">第${section}节</div><div>${time}</div></div>`;
-}
-}
 
 async function testSpeak() {
 const text = document.getElementById('test-text').value;
@@ -385,20 +356,6 @@ showAlert('xiaoai-alert', 'danger', '播报失败，请检查小爱音箱是否�
 }
 }
 
-async function jwxtManualCookie() {
-const cookie = document.getElementById('jwxt-manual-cookie').value.trim();
-const account = document.getElementById('jwxt-account').value.trim();
-if (!cookie) { showAlert('jwxt-alert', 'danger', '请输入Cookie'); return; }
-showAlert('jwxt-alert', 'info', '正在设置Cookie...');
-const r = await api('/api/jwxt/manual_cookie', {method:'POST', body:JSON.stringify({cookie, account})});
-if (r.success) {
-showAlert('jwxt-alert', 'success', 'Cookie设置成功！');
-setBadge('jwxt-badge', true);
-loadStatus();
-} else {
-showAlert('jwxt-alert', 'danger', '设置失败: ' + r.message);
-}
-}
 
 function setTermBadge(enabled, week) {
 const el = document.getElementById('term-week-badge');
@@ -427,49 +384,6 @@ showAlert('jwxt-alert', 'danger', '设置失败: ' + (r.message || '未知错误
 loadTermStatus();
 }
 
-async function xiaoaiManualCookie() {
-const cookie = document.getElementById('xiaoai-manual-cookie').value.trim();
-if (!cookie) { showAlert('xiaoai-alert', 'danger', '请输入Cookie'); return; }
-showAlert('xiaoai-alert', 'info', '正在设置Cookie...');
-const r = await api('/api/xiaoai/manual_cookie', {method:'POST', body:JSON.stringify({cookie, username: document.getElementById('xiaoai-username').value.trim()})});
-if (r.success) {
-showAlert('xiaoai-alert', 'success', 'Cookie设置成功！');
-setBadge('xiaoai-badge', true);
-loadStatus();
-} else {
-showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
-}
-}
-
-async function xiaoaiManualToken() {
-const userId = document.getElementById('xiaoai-user-id').value.trim();
-const passToken = document.getElementById('xiaoai-service-token').value.trim();
-if (!userId || !passToken) { showAlert('xiaoai-alert', 'danger', '请输入userId和passToken'); return; }
-const tokenObj = {userId: userId, passToken: passToken};
-showAlert('xiaoai-alert', 'info', '正在设置Token...');
-const r = await api('/api/xiaoai/manual_token', {method:'POST', body:JSON.stringify({token: JSON.stringify(tokenObj), username: document.getElementById('xiaoai-username').value.trim()})});
-if (r.success) {
-showAlert('xiaoai-alert', 'success', 'Token设置成功！');
-setBadge('xiaoai-badge', true);
-loadStatus();
-} else {
-showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
-}
-}
-
-async function xiaoaiManualTokenJson() {
-const token = document.getElementById('xiaoai-manual-token').value.trim();
-if (!token) { showAlert('xiaoai-alert', 'danger', '请输入Token JSON'); return; }
-showAlert('xiaoai-alert', 'info', '正在设置Token...');
-const r = await api('/api/xiaoai/manual_token', {method:'POST', body:JSON.stringify({token, username: document.getElementById('xiaoai-username').value.trim()})});
-if (r.success) {
-showAlert('xiaoai-alert', 'success', 'Token设置成功！');
-setBadge('xiaoai-badge', true);
-loadStatus();
-} else {
-showAlert('xiaoai-alert', 'danger', '设置失败: ' + r.message);
-}
-}
 
 (async () => {
 const s = await loadStatus();
@@ -483,7 +397,7 @@ if (s && s.xiaoai.cookie_valid) {
     }).catch(() => {});
 }
 })();
-loadTimeMap();
+
 setInterval(loadStatus, 30000);
 </script>
 </body>

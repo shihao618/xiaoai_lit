@@ -1,4 +1,4 @@
-"""小爱音箱蓝图：/api/xiaoai/* 9 条路由（契约冻结自 app.py）。"""
+"""小爱音箱蓝图：/api/xiaoai/* 7 条路由（契约冻结自 app.py）。"""
 import logging
 
 from flask import Blueprint, jsonify, request
@@ -35,37 +35,6 @@ def create_xiaoai_blueprint(xiaoai_speaker):
             "otp_method": None,
         })
 
-    @bp.route("/manual_token", methods=["POST"])
-    def manual_token():
-        data = request.json or {}
-        token_str = data.get("token", "").strip()
-        username = data.get("username", "").strip()
-        if not token_str:
-            return jsonify({"success": False, "message": "Token不能为空"})
-        try:
-            xiaoai_speaker.set_manual_token(token_str, username or None)
-            status = xiaoai_speaker.get_status()
-            return jsonify({"success": True, "message": "Token设置成功",
-                            "devices": status["devices"]})
-        except Exception as e:
-            logger.error(f"手动设置Token失败: {e}")
-            return jsonify({"success": False, "message": str(e)})
-
-    @bp.route("/manual_cookie", methods=["POST"])
-    def manual_cookie():
-        data = request.json or {}
-        cookie_str = data.get("cookie", "").strip()
-        username = data.get("username", "").strip()
-        if not cookie_str:
-            return jsonify({"success": False, "message": "Cookie不能为空"})
-        try:
-            xiaoai_speaker.set_manual_cookie(cookie_str, username or None)
-            status = xiaoai_speaker.get_status()
-            return jsonify({"success": True, "message": "Cookie设置成功",
-                            "devices": status["devices"]})
-        except Exception as e:
-            logger.error(f"手动设置Cookie失败: {e}")
-            return jsonify({"success": False, "message": str(e)})
 
     @bp.route("/devices")
     def devices():

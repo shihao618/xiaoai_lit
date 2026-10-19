@@ -1,6 +1,5 @@
 """XiaoAISpeaker 门面：凭证四态状态机、存量接口兼容、播报编排（TTS→URL 回退）。"""
 
-import json
 import logging
 import threading
 import time
@@ -10,7 +9,7 @@ from typing import List, Optional
 from lit import config
 
 from . import constants
-from .account import XiaomiAccountClient, login_device_id
+from .account import XiaomiAccountClient
 from .credentials import CredentialStore, Credentials
 from .exceptions import (
     CommandRejectedError,
@@ -468,63 +467,6 @@ class XiaoAISpeaker:
                 details.append(f"{time_str} {name}")
         return f"今天{period}的课程有：{'；'.join(details)}。请准备上课。"
 
-    # ---------- 手动凭证兜底（两阶段：校验 → 提交 / 回滚） ----------
-
-    def set_manual_cookie(self, cookie_str, username=None) -> bool:
-        cookies = {}
-        for pair in (cookie_str or "").split(";"):
-            pair = pair.strip()
-            if "=" in pair:
-                k, v = pair.split("=", 1)
-                cookies[k.strip()] = v.strip()
-        user_id = str(cookies.get("userId", "") or "")
-        service_token = str(cookies.get("serviceToken", "") or "")
-        if not user_id or not service_token:
-            raise XiaoAIError("Cookie格式错误，需包含 userId 与 serviceToken")
-        candidate = Credentials(
-            user_id=user_id,
-            pass_token="",
-            device_id=str(cookies.get("deviceId", "") or "") or login_device_id(user_id),
-            service_token=service_token,
-            refreshed_at=datetime.now(),
-        )
-        devices = self._mina.device_list(candidate)
-        self._commit_credentials(candidate, devices, username)
-        logger.info("手动设置小爱Cookie成功（校验通过）")
-        return True
-
-    def set_manual_token(self, token_str, username=None) -> bool:
-        try:
-            data = json.loads(token_str)
-        except (json.JSONDecodeError, ValueError):
-            raise XiaoAIError("Token格式错误")
-        if not isinstance(data, dict):
-            raise XiaoAIError("Token格式错误")
-        user_id = str(data.get("userId") or data.get("user_id") or "")
-        pass_token = str(data.get("passToken") or data.get("pass_token") or "")
-        service_token = str(data.get("serviceToken") or data.get("service_token") or "")
-        device_id = str(data.get("deviceId") or data.get("device_id") or "")
-        security = data.get("ssecurity") or data.get("security") or None
-        if not user_id or (not pass_token and not service_token):
-            raise XiaoAIError("Token格式错误，需包含 userId 与 passToken/serviceToken")
-        if not device_id:
-            device_id = login_device_id(user_id)
-        if pass_token and not service_token:
-            token = self._account.exchange(user_id, pass_token, device_id)
-            service_token = token["service_token"]
-            security = token.get("security") or security
-        candidate = Credentials(
-            user_id=user_id,
-            pass_token=pass_token,
-            device_id=device_id,
-            service_token=service_token,
-            security=security,
-            refreshed_at=datetime.now(),
-        )
-        devices = self._mina.device_list(candidate)
-        self._commit_credentials(candidate, devices, username)
-        logger.info("手动设置小爱Token成功（校验通过）")
-        return True
 
     def _commit_credentials(self, candidate: Credentials, devices, username=None) -> None:
         """校验通过后的提交：覆盖凭证文件并迁移登录态（失败路径不会进入此处）。"""

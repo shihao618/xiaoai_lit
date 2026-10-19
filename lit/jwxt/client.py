@@ -51,21 +51,6 @@ class JWXTClient:
             return True, self._cooldown_until
         return False, None
 
-    def set_manual_cookie(self, cookie_str, account=None):
-        if account:
-            self.account = account
-        self.session.cookies.clear()
-        for pair in cookie_str.split(";"):
-            pair = pair.strip()
-            if "=" in pair:
-                k, v = pair.split("=", 1)
-                self.session.cookies.set(k.strip(), v.strip())
-        cookies._save_cookies(self)
-        self.logged_in = True
-        if not self.xnxqdm:
-            xnxqdm._fetch_xnxqdm(self)
-        logger.info("手动设置教务系统Cookie成功")
-        return True
 
     def check_cookie_valid(self):
         if not self.cookie_valid:
