@@ -7,7 +7,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null || true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libgl1 libglib2.0-0 \
+    gcc g++ libgl1 libglib2.0-0 tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -18,6 +18,7 @@ COPY . .
 RUN mkdir -p /app/cache /app/data
 
 ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Shanghai
 ENV CACHE_DIR=/app/cache
 ENV DATA_DIR=/app/data
 
