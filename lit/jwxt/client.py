@@ -1,12 +1,12 @@
 """JWXTClient 门面：公开成员签名冻结 + 跨域流程编排（语义等价自根 jwxt.py）。"""
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 
 from lit import config
-from lit.jwxt import auth, cookies, courses, lock, xnxqdm
+from lit.jwxt import auth, cookies, courses, lock, term, xnxqdm
 
 logger = logging.getLogger(__name__)
 
@@ -217,17 +217,88 @@ class JWXTClient:
             logger.error(f"获取课表异常: {e}")
             return courses._load_cache()
 
+    def ensure_term_anchor(self, course_list: list[dict]) -> bool:
+        """锚点保障入口（tasks 刷新编排唯一调用点）：
+        有效锚点存在 → True（零开销跳过）；缺失 → _probe_term_anchor；
+        整体 try-except 全捕获——探测任何失败不阻断刷新主流程。"""
+        try:
+            if term.get_effective_anchor(self.xnxqdm) is not None:
+                return True
+            return self._probe_term_anchor(course_list)
+        except Exception as e:
+            logger.warning(f"学期锚点保障异常（不影响刷新主流程）: {e}")
+            return False
+
+    def _probe_term_anchor(self, course_list: list[dict]) -> bool:
+        """取样周次（前 3 个有课小周次）逐周探测：查询 → 反推校验 →
+        成功即 save_anchor(source="auto") 并记探测依据日志；全部失败返回 False。"""
+        weeks = term.available_probe_weeks(course_list)
+        if not weeks:
+            logger.warning("课表无周次数据，无法探测学期锚点")
+            return False
+        for n in weeks[:term.PROBE_SAMPLE_SIZE]:
+            try:
+                raw = self._fetch_week_raw(n)
+            except Exception as e:
+                logger.warning(f"锚点探测请求失败(第 {n} 周): {e}")
+                continue
+            votes = term._vote_anchor(raw, n)
+            anchor = term.anchor_from_week_response(raw, n)
+            if anchor is None:
+                logger.warning(f"第 {n} 周数据未通过多数一致校验")
+                continue
+            term.save_anchor(anchor, self.xnxqdm, "auto")
+            total = sum(votes.values())
+            logger.info(
+                f"锚点探测成功: 第1教学周周一={anchor.isoformat()}"
+                f"（取样第 {n} 周, 票数 {votes[anchor]}/{total}）")
+            return True
+        logger.warning("锚点探测放弃（本次刷新），下次刷新重试")
+        return False
+
+    def _fetch_week_raw(self, week_n: int) -> list[dict]:
+        """指定周次 POST getCalendarWeekDatas（zc=str(week_n)，其余参数与
+        get_course_table 完全一致，timeout=15）；code<0 抛 ValueError，
+        网络异常自然上抛——均由 _probe_term_anchor 捕获换周。
+        返回 data 数组原貌（含 qsrq 日期字段，不经过 parse_courses）。"""
+        self.session.headers.update({
+            "Referer": f"{self.base_url}/new/student/xsgrkb/week.page?xnxqdm={self.xnxqdm}",
+            "X-Requested-With": "XMLHttpRequest",
+        })
+        resp = self.session.post(
+            f"{self.base_url}/new/student/xsgrkb/getCalendarWeekDatas",
+            data={"xnxqdm": self.xnxqdm, "zc": str(week_n), "szxqdm": "", "yxdm": ""},
+            timeout=15,
+        )
+        result = resp.json()
+        if result.get("code", -1) < 0:
+            raise ValueError(f"课表周次查询失败: {result.get('message')}")
+        return result.get("data", [])
+
     def get_today_courses(self):
         course_list = self.get_course_table()
         if not course_list:
             return []
-        today_weekday = datetime.now().weekday() + 1
-        today_courses = [c for c in course_list if c.get("day") == today_weekday]
+        today = date.today()
+        today_weekday = today.weekday() + 1
+        anchor = term.get_effective_anchor(self.xnxqdm)
+        if anchor is not None:
+            week = term.current_week(anchor, today)
+            if week <= 0:
+                logger.info(f"学期外日期（第 {week} 周），今日无课")
+                return []
+            logger.info(f"当前第 {week} 周（锚点 {anchor.isoformat()}，学期 {self.xnxqdm}）")
+            today_courses = term.filter_today(course_list, today_weekday, week)
+        else:
+            logger.warning("学期锚点未生效，周次过滤未启用（仅按星期过滤；等待探测或手动配置）")
+            today_courses = [c for c in course_list if c.get("day") == today_weekday]
         today_courses.sort(key=lambda x: x.get("section_start", 0))
         return today_courses
 
     def get_status(self):
         locked, lock_time = self.is_locked()
+        anchor = term.get_effective_anchor(self.xnxqdm)
+        week = term.current_week(anchor, date.today()) if anchor is not None else None
         return {
             "logged_in": self.logged_in,
             "cookie_valid": self.cookie_valid,
@@ -237,4 +308,7 @@ class JWXTClient:
             "lock_time": lock_time.isoformat() if lock_time else None,
             "failed_attempts": self.failed_attempts,
             "xnxqdm": self.xnxqdm,
+            "current_week": week,
+            "term_start_monday": anchor.isoformat() if anchor is not None else None,
+            "week_filter_enabled": anchor is not None,
         }

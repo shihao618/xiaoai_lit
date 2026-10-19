@@ -25,6 +25,7 @@ class BackgroundTasks:
         logger.info("刷新课表数据...")
         courses = self.jwxt.get_course_table()
         if courses:
+            self.jwxt.ensure_term_anchor(courses)
             self.today_courses = self.jwxt.get_today_courses()
             logger.info(f"今日课程: {len(self.today_courses)} 门")
             for c in self.today_courses:

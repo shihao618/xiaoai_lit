@@ -1,6 +1,7 @@
 """教务系统合并状态文件（data/jwxt/jwxt.json）唯一读写方。
 
-六键结构：cookies / login_time / account / xnxqdm / updated / version。
+九键结构：cookies / login_time / account / xnxqdm / updated / version /
+锚点域三键（term_start_monday / term_xnxqdm / term_start_source）。
 读-合并-写协议保证 cookies 域与 xnxqdm 域各自保存互不覆盖。
 """
 import json
@@ -23,6 +24,9 @@ _DEFAULT_STATE = {
     "account": "",
     "xnxqdm": "",
     "updated": None,
+    "term_start_monday": None,
+    "term_xnxqdm": "",
+    "term_start_source": "",
 }
 
 
@@ -48,7 +52,7 @@ def read_state() -> dict:
 
 
 def update_state(updates: dict) -> None:
-    """读-合并-写：仅覆盖 updates 涉及的键，其余键保留；后置六键齐全。"""
+    """读-合并-写：仅覆盖 updates 涉及的键，其余键保留；后置九键齐全。"""
     os.makedirs(os.path.dirname(state_path()), exist_ok=True)
     data = dict(_DEFAULT_STATE)
     data.update(read_state())
