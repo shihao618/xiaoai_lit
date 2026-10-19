@@ -95,12 +95,14 @@ LIT/
 │   │   ├── __init__.py   #   通用配置（调度/路径/日志）+ 13 属性汇总导出
 │   │   ├── jwxt.py       #   教务系统配置（地址/账号/学期代码）
 │   │   └── xiaoai.py     #   小爱音箱配置（TTS 地址）
-│   ├── jwxt/             # 教务系统域（门面 + 5 领域模块）
+│   ├── layout.py         # 启动迁移编排：旧平铺布局 → 按域分组（一次性幂等）
+│   ├── jwxt/             # 教务系统域（门面 + 6 领域模块）
 │   │   ├── client.py     #   JWXTClient 门面（对外唯一接口）
 │   │   ├── auth.py       #   登录与验证码 OCR
 │   │   ├── lock.py       #   账号锁定与冷却
-│   │   ├── cookies.py    #   Cookie 持久化
-│   │   ├── xnxqdm.py     #   学期代码缓存
+│   │   ├── cookies.py    #   Cookie 持久化（jwxt.json cookies 域）
+│   │   ├── state.py      #   合并状态 jwxt.json 唯一读写方（六键 + 原子写）
+│   │   ├── xnxqdm.py     #   学期代码缓存（jwxt.json xnxqdm 域）
 │   │   └── courses.py    #   课表获取与解析
 │   ├── xiaoai/           # 小爱音箱域（10 模块）
 │   │   ├── speaker.py    #   XiaoAISpeaker 门面（状态机 + 对外接口）
@@ -108,17 +110,17 @@ LIT/
 │   │   ├── mina.py       #   MiNA 播报协议（TTS/URL 播放/状态）
 │   │   ├── credentials.py#   凭证存储（持久化/恢复/失效标记）
 │   │   ├── qrlogin.py    #   扫码会话管理与二维码生成
-│   │   ├── tts.py        #   TTS 合成与音频缓存
+│   │   ├── tts.py        #   TTS 合成与音频缓存（每日 06:05 清理）
 │   │   └── ...           #   httpclient / constants / exceptions
-│   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒）
+│   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒/TTS 清理）
 │   └── web/              # Web 层
-│       ├── app.py        #   create_app() 应用工厂（对象装配 + 启动后台任务）
-│       └── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
-├── templates/index.html  # 前端单页
-├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/，174 用例）
+│       ├── app.py        #   create_app() 应用工厂（迁移编排 + 对象装配 + 启动后台任务）
+│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（9 路由）/ audio（TTS 音频）/ status（聚合状态）
+│       └── templates/    #   前端单页 index.html（随包入镜像）
+├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py，196 用例）
 ├── Dockerfile / docker-compose.yml / requirements.txt
-├── cache/                # 课表缓存（course_table.json）
-└── data/                 # 运行数据（教务 Cookie/学期代码/小爱凭证/TTS 音频缓存）
+├── cache/                # 缓存卷：cache/jwxt/course_table.json + cache/xiaoai/tts_cache/
+└── data/                 # 数据卷：data/jwxt/jwxt.json（+ jwxt_lock.json）+ data/xiaoai/（凭证）
 ```
 
 ## 模块地图
@@ -126,9 +128,11 @@ LIT/
 | 模块 | 职责 |
 |------|------|
 | `lit/config/` | 环境变量加载与默认值：jwxt / xiaoai 两域文件 + `__init__.py` 通用配置（调度/路径/日志）与 13 属性汇总导出 |
-| `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 5 个领域模块 |
+| `lit/layout.py` | 启动迁移编排：旧平铺布局自动搬移至按域分组目录（幂等可重入，失败不阻断启动） |
+| `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 6 个领域模块 |
+| `lit/jwxt/state.py` | 教务合并状态 `data/jwxt/jwxt.json` 唯一读写方：六键结构、读-合并-写、原子落位 |
 | `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
-| `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、课前 30 分钟提醒 |
+| `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、TTS 缓存清理每日 06:05、课前 30 分钟提醒 |
 | `lit/web/` | Flask 应用工厂与 5 蓝图（共 18 条路由），对象装配与启动时序集中于此 |
 
 ## 技术细节
@@ -137,14 +141,17 @@ LIT/
 - **课表获取**：POST `/new/student/xsgrkb/getCalendarWeekDatas`，返回JSON格式课表数据
 - **课表字段**：课程名(kcmc)、节次(ps/pe)、星期(xq)、教室(jxcdmc)、时间(qssj/jssj)、周次(zc)
 - **小爱控制**：自研实现小米扫码登录协议（`/longPolling/loginUrl` 轮询 + serviceToken 换取）与 MiNA `ubus` 接口（TTS 播报 / URL 播放 / 播放状态查询），不依赖第三方 mi-service 库
-- **定时调度**：使用 `APScheduler` 实现cron定时任务
-- **课表缓存**：JSON格式缓存到本地，避免频繁登录
+- **定时调度**：使用 `APScheduler` 实现cron定时任务（课表刷新 06:00、TTS 缓存清理 06:05，错峰执行）
+- **课表缓存**：JSON格式缓存到 `cache/jwxt/course_table.json`，避免频繁登录
+- **教务状态合并**：登录态与学期代码合并于 `data/jwxt/jwxt.json`（扁平六键：cookies / login_time / account / xnxqdm / updated / version），读-合并-写协议保证两域互不覆盖，原子落位防半写
 
 ## 注意事项
 
 1. 小爱音箱需与小米账号绑定，且账号下有已配网的小爱音箱设备；扫码登录使用的是扫码手机所登录的小米账号
-2. 登录凭证持久化在 `data/xiaoai_credentials.json`，容器重启后自动恢复登录态，无需重新扫码
+2. 登录凭证持久化在 `data/xiaoai/xiaoai_credentials.json`，容器重启后自动恢复登录态，无需重新扫码
 3. 凭证失效（如在其他设备重新登录导致失效）时，页面会提示重新扫码，不会自动用账号密码重登
-2. 教务系统验证码识别可能有失败情况，已设置10次重试
-3. 课表数据每日06:00自动刷新，也可通过重启容器手动触发
-4. 学年学期代码需根据实际情况设置（如202601表示2026-2027学年第一学期）
+4. TTS 语音缓存位于 `cache/xiaoai/tts_cache/`，每日 06:05 自动全量清理（静音垫底文件豁免）
+5. 从旧版本升级时启动自动迁移存量数据（教务 Cookie 与学期代码合并、凭证/课表缓存/TTS 缓存搬移至按域分组目录），无需手工干预
+6. 教务系统验证码识别可能有失败情况，已设置10次重试
+7. 课表数据每日06:00自动刷新，也可通过重启容器手动触发
+8. 学年学期代码需根据实际情况设置（如202601表示2026-2027学年第一学期）
