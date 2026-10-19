@@ -6,3 +6,6 @@ cache/
 data/
 .arts/
 .codeartsdoer/specs/refactor_structure/baseline/snapshot/
+.merkle-snapshot.json
+data_backup_*/
+v2_*.log

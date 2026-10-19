@@ -2,6 +2,8 @@
 .arts/
 .codeartsdoer/
 .pytest_cache/
+.git/
+.gitignore
 __pycache__/
 *.pyc
 tests/
@@ -9,3 +11,5 @@ conftest.py
 cache/
 data/
 docker-compose.yml
+README.md
+*.md

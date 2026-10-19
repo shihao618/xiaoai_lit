@@ -7,7 +7,7 @@ def create_status_blueprint(jwxt_client, xiaoai_speaker):
 
     @bp.route("/status")
     def overall_status():
-        jwxt_ok = jwxt_client.check_cookie_valid()
+        jwxt_ok = jwxt_client.cookie_valid
         xiaoai_ok = xiaoai_speaker.cookie_valid
         locked, lock_time = jwxt_client.is_locked()
         return jsonify({

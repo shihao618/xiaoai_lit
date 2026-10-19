@@ -7,19 +7,27 @@ services:
       - "10379:10379"
     environment:
       - JWXT_BASE_URL=https://lljw.lit.edu.cn
-      - JWXT_ACCOUNT=
-      - JWXT_PASSWORD=
-
+      - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}          # 引导/回退凭证（持久化优先，见 README）
+      - JWXT_PASSWORD=${JWXT_PASSWORD:-}
+      - XIAOAI_TTS_BASE_URL=
       - XIAOAI_TTS_BACKUP_URL=
       - REMIND_BEFORE_MINUTES=30
       - LOG_LEVEL=INFO
       - CACHE_DIR=/app/cache
       - DATA_DIR=/app/data
     volumes:
-      - ./cache:/app/cache
-      - ./data:/app/data
+      - lit-data:/app/data
+      - lit-cache:/app/cache
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:10379/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     logging:
       driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  lit-data:
+  lit-cache:

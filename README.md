@@ -1,154 +1,148 @@
 # LIT 课表提醒服务
 
-洛阳理工学院教务系统课表查询 + 小爱音箱上课提醒 Docker 应用。
+洛阳理工学院教务系统课表提醒 + 小爱音箱语音播报 Docker 应用。
 
-## 功能
+## 简介
 
-- 自动登录教务系统（OCR识别验证码 + AES加密密码）
-- 通过 JSON API 获取课表数据，每日自动刷新
-- 上午/下午智能提醒：根据课表自动判断提醒时间
-- 先闹钟提示，再播报课程名称和教室
+- **教务 API 直取课表**：经教务系统 JSON 接口获取周次定位与当周课程（零 HTML 解析），调课等排课差异以教务端数据为准
+- **掉线自动重登**：首次登录记住账号密码（持久化到数据卷），Cookie 失效后预算内自动恢复，锁定期零请求不触发风控
+- **小爱音箱播报**：上午/下午课程提醒，最早课前 30 分钟（可配）TTS 播报课程名称与教室
 
-## 提醒逻辑
+## Prerequisites
 
-- **周次过滤**：课表区分单双周与部分周课程——仅当课程周次包含当前教学周（或课程为每周上课）才会提醒；学期外日期（未开学/放假）不提醒
-- **上午**：1-2节有课 → 07:30提醒；1-2节无课但3-4节有课 → 09:30提醒
-- **下午**：5-6节有课 → 14:00提醒；5-6节无课但7-8节有课 → 16:00提醒
-- 提醒方式：先播报"叮叮叮叮！上课提醒！"，等待4秒后播报课程详情（课程名称+教室）
+- Docker Desktop 4.x+（含 Compose V2）
+- 宿主机 10379 端口空闲
+- 教务系统账号 + 小爱音箱（小米账号，页面扫码登录）
 
-## 学期锚点（周次过滤）
-
-系统需要知道本学期**第 1 教学周周一**的日期，才能推算当前教学周次：
-
-- **自动获取**：每日课表刷新时若锚点缺失，系统查询教务校历接口（学期校历网格第 1 周行）校历直取第 1 教学周周一，成功后自动持久化
-- **手动配置**：页面教务配置区"学期锚点配置"可直接填写第 1 教学周周一（仅周一合法，如 `2026-09-07`），手动值优先于自动获取
-- 学期切换后（学年学期代码变化）旧锚点自动失效，下次刷新重新获取；获取失败不阻断课表刷新（回退仅按星期过滤，宁可多提醒不可停提醒）
-
-
-## 快速开始
-
-### 一键安装（Docker）
+## Quick Start
 
 ```bash
-git clone https://github.com/shihao618/xiaoai_lit.git && cd xiaoai_lit && docker compose up -d --build
+git clone https://github.com/shihao618/xiaoai_lit.git
+cd xiaoai_lit
+docker compose up -d --build
 ```
 
-启动后打开 `http://localhost:10379` 完成后续配置（教务账号 + 扫码绑定音箱）。
+浏览器打开 http://localhost:10379 ：
 
-### 1. 配置教务系统账号
+1. 教务配置区填写账号密码登录（或经环境变量预置引导凭证）
+2. 小爱配置区扫码登录音箱账号
 
-编辑 `docker-compose.yml`，填入教务系统账号（`JWXT_ACCOUNT` / `JWXT_PASSWORD`），然后重启容器：
+登录成功后凭证自动持久化到命名卷，容器重启/掉线均自动恢复，无需重复登录。
+
+## Configuration
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `JWXT_BASE_URL` | `https://lljw.lit.edu.cn` | 教务系统地址 |
+| `JWXT_ACCOUNT` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
+| `JWXT_PASSWORD` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
+| `XNXQDM` | （空） | 学年学期代码（自动获取并缓存，通常无需配置） |
+| `XIAOAI_TTS_BASE_URL` | （空） | 小爱 TTS 服务地址（空 = 自动获取） |
+| `XIAOAI_TTS_BACKUP_URL` | （空） | 小爱 TTS 备用地址 |
+| `REMIND_BEFORE_MINUTES` | `30` | 提醒提前量（分钟） |
+| `COOKIE_REFRESH_INTERVAL` | `3600` | Cookie 检查间隔（秒） |
+| `LOG_LEVEL` | `INFO` | 日志级别 |
+| `CACHE_DIR` | `/app/cache` | 缓存目录 |
+| `DATA_DIR` | `/app/data` | 数据目录 |
+
+**凭证优先级**：数据卷内 `data/jwxt/credentials.json`（最近一次成功登录）优先；环境变量仅在全新部署无持久化凭证时作引导。修改环境变量不会覆盖已持久化凭证——切换账号请在前端登录页重新登录，或删除卷内 `credentials.json` 后重启。
+
+## Volumes
+
+| 卷 | 挂载点 | 内容 | 寿命 |
+|---|---|---|---|
+| `lit-data` | `/app/data` | 教务凭证/状态/锁定记录、小爱凭证 | `docker compose down -v` 清除 |
+| `lit-cache` | `/app/cache` | 课表缓存、TTS 音频缓存 | `docker compose down -v` 清除 |
+
+日常重启（`docker compose restart` / `down` 不带 `-v`）数据保留。
+
+备份与恢复：
 
 ```bash
+# 备份（容器运行中导出）
+docker cp lit-course-reminder:/app/data ./backup
+# 恢复
+docker cp ./backup/. lit-course-reminder:/app/data/
 docker compose restart
 ```
 
-### 2. 构建并启动
+## Healthcheck
+
+镜像内置 `HEALTHCHECK`（30s 间隔 / 5s 超时 / 40s 启动宽限 / 3 次重试），探活端点 `/api/status` 消费内存态状态——**零教务请求**：探活不消耗教务请求预算、不触发自动重登。
 
 ```bash
-# Docker（推荐）
+docker inspect --format "{{.State.Health.Status}}" lit-course-reminder   # healthy
+```
+
+若持续 `unhealthy`：`docker logs lit-course-reminder` 查看启动日志（常见为端口占用或启动刷新慢于 40s 宽限窗口）。
+
+## Maintenance
+
+### 日志查看
+
+```bash
+docker logs -f --tail 100 lit-course-reminder
+```
+
+### 更新升级（铲掉重部署）
+
+```bash
+docker compose down -v        # 清除容器与数据卷，回到全新基线
 docker compose up -d --build
-
-# 或本地直接运行
-python main.py
 ```
 
-### 3. 扫码登录小爱音箱
+数据全清后重新走首次登录引导——**无迁移、无回滚兼容**（旧版本数据整体消失属预期行为）。
 
-1. 打开 `http://localhost:10379`，进入小爱音箱配置区
-2. 点击"扫码登录"，用小米手机（已绑定小爱音箱的账号）扫描页面二维码并确认
-3. 登录成功后页面自动展示设备列表，选择目标音箱即可
+### 小爱凭证备份提示
 
-无需输入小米账号密码，也无需短信验证码。
-
-### 4. 查看日志
+`down -v` 会一并清除小爱扫码凭证（重新扫码成本较高），如需保留：
 
 ```bash
-docker-compose logs -f
+# 清除卷之前备份
+docker cp lit-course-reminder:/app/data/xiaoai/xiaoai_credentials.json ./
+# 新容器启动后恢复
+docker cp ./xiaoai_credentials.json lit-course-reminder:/app/data/xiaoai/
 ```
 
-## 配置项
+进阶选项——将小爱凭证隔离到 external 卷（`down -v` 不波及）：
 
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `JWXT_BASE_URL` | `https://lljw.lit.edu.cn` | 教务系统地址 |
-| `JWXT_ACCOUNT` | -（必填） | 教务系统账号 |
-| `JWXT_PASSWORD` | -（必填） | 教务系统密码 |
-| `XNXQDM` | `202601` | 学年学期代码 |
-| `XIAOAI_TTS_BACKUP_URL` | - | TTS 被拒时的备用音频 URL（可选） |
-| `REMIND_BEFORE_MINUTES` | `30` | 提前提醒分钟数 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
-
-## 文件结构
-
-```
-LIT/
-├── main.py               # 唯一入口：日志初始化 → create_app() → app.run
-├── conftest.py           # pytest 根配置（sys.path 锚定 + 目录隔离）
-├── lit/                  # 统一业务包
-│   ├── config/           # 配置域：环境变量加载与默认值
-│   │   ├── __init__.py   #   通用配置（调度/路径/日志）+ 13 属性汇总导出
-│   │   ├── jwxt.py       #   教务系统配置（地址/账号/学期代码）
-│   │   └── xiaoai.py     #   小爱音箱配置（TTS 地址）
-│   ├── layout.py         # 启动迁移编排：旧平铺布局 → 按域分组（一次性幂等）
-│   ├── jwxt/             # 教务系统域（门面 + 6 领域模块）
-│   │   ├── client.py     #   JWXTClient 门面（对外唯一接口）
-│   │   ├── auth.py       #   登录与验证码 OCR
-│   │   ├── lock.py       #   账号锁定与冷却
-│   │   ├── cookies.py    #   Cookie 持久化（jwxt.json cookies 域）
-│   │   ├── state.py      #   合并状态 jwxt.json 唯一读写方（九键 + 原子写）
-│   │   ├── term.py       #   学期锚点与教学周（解析/推算/周次过滤/校历网格锚点解析）
-│   │   ├── xnxqdm.py     #   学期代码缓存（jwxt.json xnxqdm 域）
-│   │   └── courses.py    #   课表获取与解析
-│   ├── xiaoai/           # 小爱音箱域（10 模块）
-│   │   ├── speaker.py    #   XiaoAISpeaker 门面（状态机 + 对外接口）
-│   │   ├── account.py    #   小米账号扫码协议（申请/轮询/换 Token）
-│   │   ├── mina.py       #   MiNA 播报协议（TTS/URL 播放/状态）
-│   │   ├── credentials.py#   凭证存储（持久化/恢复/失效标记）
-│   │   ├── qrlogin.py    #   扫码会话管理与二维码生成
-│   │   ├── tts.py        #   TTS 合成与音频缓存（每日 06:05 清理）
-│   │   └── ...           #   httpclient / constants / exceptions
-│   ├── tasks.py          # 统一后台任务：单调度器（Cookie 检查/课表刷新/上下午提醒/TTS 清理）
-│   └── web/              # Web 层
-│       ├── app.py        #   create_app() 应用工厂（迁移编排 + 对象装配 + 启动后台任务）
-│       ├── blueprints/   #   5 蓝图：pages（首页）/ jwxt（5 路由）/ xiaoai（7 路由）/ audio（TTS 音频）/ status（聚合状态）
-│       └── templates/    #   前端单页 index.html（随包入镜像）
-├── tests/                # 测试（tests/jwxt/ + tests/xiaoai/ + test_layout.py + test_tasks_week.py，228 用例）
-├── Dockerfile / docker-compose.yml / requirements.txt
-├── cache/                # 缓存卷：cache/jwxt/course_table.json + cache/xiaoai/tts_cache/
-└── data/                 # 数据卷：data/jwxt/jwxt.json（+ jwxt_lock.json）+ data/xiaoai/（凭证）
+```yaml
+# docker-compose.override.yml 片段（不作默认配置）
+volumes:
+  xiaoai-data:
+    external: true
 ```
 
-## 模块地图
+（先 `docker volume create xiaoai-data`，再把 `/app/data/xiaoai` 挂载到该卷。）
 
-| 模块 | 职责 |
-|------|------|
-| `lit/config/` | 环境变量加载与默认值：jwxt / xiaoai 两域文件 + `__init__.py` 通用配置（调度/路径/日志）与 13 属性汇总导出 |
-| `lit/layout.py` | 启动迁移编排：旧平铺布局自动搬移至按域分组目录（幂等可重入，失败不阻断启动） |
-| `lit/jwxt/` | 教务系统登录与课表获取，JWXTClient 门面封装 6 个领域模块 |
-| `lit/jwxt/state.py` | 教务合并状态 `data/jwxt/jwxt.json` 唯一读写方：九键结构、读-合并-写、原子落位 |
-| `lit/jwxt/term.py` | 学期锚点与教学周纯函数：锚点解析/有效性校验、教学周推算、单双周双条件过滤、校历网格锚点解析 |
-| `lit/xiaoai/` | 小爱音箱扫码登录与 MiNA 播报，XiaoAISpeaker 门面对外 |
-| `lit/tasks.py` | 统一后台调度：Cookie 检查每 30 分钟、课表刷新每日 06:00、TTS 缓存清理每日 06:05、课前 30 分钟提醒 |
-| `lit/web/` | Flask 应用工厂与 5 蓝图（共 15 条路由），对象装配与启动时序集中于此 |
+### 凭证重置
 
-## 技术细节
+- 前端重新登录（新凭证自动覆盖持久化文件）
+- 或删除卷内凭证文件：`docker exec lit-course-reminder rm /app/data/jwxt/credentials.json`，回到引导态
 
-- **登录**：POST `/new/login`，验证码OCR + AES-ECB加密密码
-- **课表获取**：POST `/new/student/xsgrkb/getCalendarWeekDatas`，返回JSON格式课表数据
-- **课表字段**：课程名(kcmc)、节次(ps/pe)、星期(xq)、教室(jxcdmc)、时间(qssj/jssj)、周次(zc)
-- **小爱控制**：自研实现小米扫码登录协议（`/longPolling/loginUrl` 轮询 + serviceToken 换取）与 MiNA `ubus` 接口（TTS 播报 / URL 播放 / 播放状态查询），不依赖第三方 mi-service 库
-- **定时调度**：使用 `APScheduler` 实现cron定时任务（课表刷新 06:00、TTS 缓存清理 06:05，错峰执行）
-- **课表缓存**：JSON格式缓存到 `cache/jwxt/course_table.json`，避免频繁登录
-- **教务状态合并**：登录态、学期代码与学期锚点合并于 `data/jwxt/jwxt.json`（扁平九键：cookies / login_time / account / xnxqdm / updated / version + 锚点域三键 term_start_monday / term_xnxqdm / term_start_source（取值 "auto"=校历直取 / "manual"=手动），version 保持 1），读-合并-写协议保证各域互不覆盖，原子落位防半写
+### 学期切换
 
-## 注意事项
+新学期首次刷新时自动检测（教务接口返回新学年学期代码）——自动切换、课表按新学期第 1 周重查，日志出现"学期切换"，无需人工干预。寒暑假期间徽章显示"学期外"、不注册提醒，开学自动恢复。
 
-1. 小爱音箱需与小米账号绑定，且账号下有已配网的小爱音箱设备；扫码登录使用的是扫码手机所登录的小米账号
-2. 登录凭证持久化在 `data/xiaoai/xiaoai_credentials.json`，容器重启后自动恢复登录态，无需重新扫码
-3. 凭证失效（如在其他设备重新登录导致失效）时，页面会提示重新扫码，不会自动用账号密码重登
-4. TTS 语音缓存位于 `cache/xiaoai/tts_cache/`，每日 06:05 自动全量清理（静音垫底文件豁免）
-5. 从旧版本升级时启动自动迁移存量数据（教务 Cookie 与学期代码合并、凭证/课表缓存/TTS 缓存搬移至按域分组目录），无需手工干预
-6. 教务系统验证码识别可能有失败情况，已设置10次重试
-7. 课表数据每日06:00自动刷新，也可通过重启容器手动触发
-8. 学年学期代码需根据实际情况设置（如202601表示2026-2027学年第一学期）
+### 开发与测试
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/    # 当前基线：230 用例
+```
+
+## Security
+
+- **密码明文落盘**：`data/jwxt/credentials.json` 以明文保存教务账号密码（文件权限 `600`）。单机自部署场景下，可逆加密因密钥同机存放不构成实质防线，故采用明文 + 权限隔离方案；请自行确保宿主机与 Docker 环境访问安全
+- **卷访问控制**：命名卷由 Docker 直接管理（位于 Docker Desktop 虚拟机文件系统内），宿主普通用户无直接路径访问
+- **权限**：凭证文件 `0600`（仅容器内运行用户可读）
+
+## Troubleshooting
+
+| 现象 | 处置 |
+|---|---|
+| 账号锁定/冷却 | **勿手动反复重试**——系统在锁定期自动零请求等待解锁（日志含解锁时间），持续失效请到配置页重新登录 |
+| 日志"凭证疑似失效" | 教务账号密码已变更——前端重新登录即可（自动重登已停止，防反复试错触发风控） |
+| 教务接口异常 | 自动缓存降级：当日缓存有效时按缓存提醒（宁可多提醒不可停提醒）；跨周缓存自动弃用，不会播报过期课表 |
+| Windows 宿主目录直接挂载（bind mount）失败 | 本项目仅支持命名卷部署（non-root 运行 + Windows 权限语义限制），不提供以 root 运行的降级方案 |
+| 周次徽章显示"学期外" | 寒暑假正常显示（教务接口无当日教学周数据）；开学后自动恢复为"第 N 周" |

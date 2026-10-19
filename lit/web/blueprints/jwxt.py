@@ -1,11 +1,8 @@
-"""教务系统蓝图：/api/jwxt/* 5 条路由（契约冻结自 app.py + Q4 显式扩展 term_config）。"""
+"""教务系统蓝图：/api/jwxt/* 4 条路由（captcha/login/status/courses，Q8 路由 15→14）。"""
 import base64
 import logging
-from datetime import date
 
 from flask import Blueprint, jsonify, request
-
-from lit.jwxt import term
 
 logger = logging.getLogger(__name__)
 
@@ -53,26 +50,5 @@ def create_jwxt_blueprint(jwxt_client):
         if course_list:
             return jsonify({"success": True, "courses": course_list})
         return jsonify({"success": False, "message": "获取课表失败"})
-
-    @bp.route("/term_config", methods=["POST"])
-    def term_config():
-        """Q4 手动兜底：设置第 1 教学周周一锚点（未登录亦可配置，绑定当前 xnxqdm）。"""
-        data = request.json or {}
-        raw = str(data.get("term_start_monday") or "").strip()
-        if not raw:
-            return jsonify({"success": False, "message": "锚点日期不能为空"})
-        d = term.parse_anchor(raw)
-        if d is None:
-            try:
-                date.fromisoformat(raw)
-            except (ValueError, TypeError):
-                return jsonify({"success": False, "message": "日期格式非法，应为 YYYY-MM-DD"})
-            return jsonify({"success": False, "message": f"{raw} 不是周一，第 1 教学周锚点必须为周一"})
-        try:
-            term.save_anchor(d, jwxt_client.xnxqdm, "manual")
-            return jsonify({"success": True, "message": f"学期锚点已设置: {d.isoformat()}"})
-        except OSError as e:
-            logger.error(f"保存学期锚点失败: {e}")
-            return jsonify({"success": False, "message": f"设置失败: {e}"})
 
     return bp

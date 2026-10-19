@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 def create_app():
     os.makedirs(config.DATA_DIR, exist_ok=True)
     os.makedirs(config.CACHE_DIR, exist_ok=True)
-    from lit import layout
-    layout.run_startup_migration()
     jwxt_client = JWXTClient()
     xiaoai_speaker = XiaoAISpeaker()
     tasks = BackgroundTasks(jwxt_client, xiaoai_speaker)
