@@ -1,4 +1,4 @@
-# 推送 v* 标签时自动：构建镜像 → 推送 GHCR → 创建 GitHub Release。
+# 推送 v* 标签时自动：运行测试（门禁）→ 构建镜像 → 推送 GHCR → 创建 GitHub Release。
 # NAS 端即可免构建直接 docker pull ghcr.io/shihao618/xiaoai_lit:latest
 name: Release & Publish Image
 
@@ -16,7 +16,33 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
+  # 发布门禁：测试不通过则不构建、不发布
+  test:
+    name: pytest (Python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
   build-and-publish:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

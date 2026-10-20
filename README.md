@@ -1,5 +1,9 @@
 # LIT 课表提醒服务
 
+[![Tests](https://github.com/shihao618/xiaoai_lit/actions/workflows/tests.yml/badge.svg)](https://github.com/shihao618/xiaoai_lit/actions/workflows/tests.yml)
+[![Release & Publish](https://github.com/shihao618/xiaoai_lit/actions/workflows/release.yml/badge.svg)](https://github.com/shihao618/xiaoai_lit/actions/workflows/release.yml)
+[![GHCR](https://img.shields.io/badge/image-ghcr.io%2Fshihao618%2Fxiaoai__lit-blue)](https://github.com/shihao618/xiaoai_lit/pkgs/container/xiaoai_lit)
+
 洛阳理工学院教务系统课表提醒 + 小爱音箱语音播报 Docker 应用。
 
 ## 简介
@@ -34,6 +38,7 @@ tests/               单元测试（jwxt / xiaoai / 任务调度），fixtures/ 
 Dockerfile           多阶段镜像构建；docker-compose.yml 单容器编排
 docker-compose.fnos.yml  飞牛OS（fnOS）构建安装编排（命名卷显式固定、start_period 90s）
 docker-compose.fnos-image.yml  飞牛OS 免构建安装（直接拉取 GHCR 预构建镜像）
+.github/workflows/tests.yml  push/PR 自动跑测试（发布门禁）
 .github/workflows/release.yml  推送 v* 标签自动构建镜像 + 发布 GitHub Release
 requirements.txt     生产依赖（固定版本）；requirements-dev.txt 追加 pytest
 ```
@@ -240,6 +245,10 @@ python main.py                        # 本地启动 http://127.0.0.1:10379
 ```bash
 python -m pytest tests/    # 当前基线：248 用例（仅云端播报通道）
 ```
+
+CI（GitHub Actions）：
+- 每次 push `master` / PR 自动运行上述测试（[tests.yml](.github/workflows/tests.yml)）
+- 发布工作流（打 `v*` 标签）**以测试通过为前置门槛**，测试失败不会构建/发布镜像
 
 ## Security
 
