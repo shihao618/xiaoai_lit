@@ -1,4 +1,4 @@
-"""XiaoAISpeaker 门面：凭证四态状态机、存量接口兼容、云端原生播报编排。"""
+"""XiaoAISpeaker 门面：凭证四态状态机、对外接口、云端原生播报编排。"""
 
 import logging
 import threading
@@ -31,7 +31,7 @@ _GRADE_LABELS = {1: "已确认播放", 2: "指令已接受未确认播放", 3: "
 
 
 class XiaoAISpeaker:
-    """对 app.py / scheduler.py / cookie_manager.py 保持存量契约的门面。"""
+    """对 app.py / tasks.py 提供稳定契约的门面。"""
 
     def __init__(self, *, http=None, account=None, mina=None, store=None, qr=None,
                  miot=None):
@@ -49,7 +49,7 @@ class XiaoAISpeaker:
         self._device_id_cache = None
         self._load_credentials_on_init()
 
-    # ---------- 存量兼容属性（app.py 直接读取） ----------
+    # ---------- 对外状态属性（app.py / blueprints 读取） ----------
 
     @property
     def logged_in(self) -> bool:
@@ -161,7 +161,7 @@ class XiaoAISpeaker:
             return
         logger.debug("小爱操作失败（凭证状态不变）: %s", exc)
 
-    # ---------- 存量兼容方法 ----------
+    # ---------- 对 web 蓝图暴露的方法 ----------
 
     def check_cookie_valid(self) -> bool:
         with self._lock:
@@ -248,7 +248,7 @@ class XiaoAISpeaker:
         return self.speak_with_result(text)[0]
 
     def speak_with_result(self, text):
-        """存量二维契约（签名/布尔语义/调用方零变化）。"""
+        """二维返回契约：(ok, message)。"""
         ok, msg, _ = self.speak_with_detail(text)
         return ok, msg
 

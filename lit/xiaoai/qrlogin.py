@@ -124,7 +124,7 @@ class QRLoginManager:
         return result
 
     def get_login_state(self) -> dict:
-        """login_status 兼容视图：无会话时保持上次终态。"""
+        """login_status 视图：无会话时保持上次终态。"""
         with self._lock:
             session = self._session
         if session is None:

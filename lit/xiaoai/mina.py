@@ -143,7 +143,7 @@ class MiNAClient:
         return devices
 
     def text_to_speech(self, cred, device_id: str, text: str) -> None:
-        """TTS 播报：path=mibrain（存量 LIT 实测组合）。"""
+        """TTS 播报：path=mibrain（实测可用组合；L05B/L05C 可能被服务端静默忽略）。"""
         self._mina_request(cred, "/remote/ubus", form={
             "deviceId": device_id,
             "message": json.dumps({"text": text}, ensure_ascii=False),

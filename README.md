@@ -137,14 +137,8 @@ chown -R 1000:1000 data cache   # fnOS 默认用户 1000:1000；不同请按 `id
 - 备份：`tar czf lit-data-backup.tgz data cache`；恢复：解压回项目目录后重启容器
 - 升级（免构建）：修改 `LIT_IMAGE` 版本或重新 `docker pull latest` → 重启项目；数据目录不变
 - 升级（源码）：替换代码后重新构建项目即可
-- **从旧的命名卷迁移**（之前用普通 docker-compose 部署过）：
-  ```bash
-  mkdir -p data cache
-  docker run --rm -v lit_lit-data:/from -v "$PWD/data":/to alpine sh -c "cp -a /from/. /to/"
-  docker run --rm -v lit_lit-cache:/from -v "$PWD/cache":/to alpine sh -c "cp -a /from/. /to/"
-  chown -R 1000:1000 data cache
-  ```
 - 说明：仓库根目录 `docker-compose.yml`（通用/本机）仍使用命名卷；fnOS 两份编排改用本地目录
+- **不做旧数据兼容**：全新部署请使用空的数据目录；旧版本的数据格式不会被迁移读取
 
 ## Configuration
 
@@ -210,7 +204,7 @@ docker compose down -v        # 清除容器与数据卷，回到全新基线
 docker compose up -d --build
 ```
 
-数据全清后重新走首次登录引导——**无迁移、无回滚兼容**（旧版本数据整体消失属预期行为）。
+数据全清后重新走首次登录引导。**本项目不做旧数据兼容**：升级 = 全新部署（清空 `data/`、`cache/` 后重新登录），旧版本数据不会迁移读取。
 
 ### 小爱凭证备份提示
 
@@ -261,7 +255,7 @@ python main.py                        # 本地启动 http://127.0.0.1:10379
 测试：
 
 ```bash
-python -m pytest tests/    # 当前基线：248 用例（仅云端播报通道）
+python -m pytest tests/    # 当前基线：241 用例（仅云端播报通道）
 ```
 
 CI（GitHub Actions）：

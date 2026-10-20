@@ -46,58 +46,25 @@ def test_load_new_format_rejected_flag(tmp_path):
     assert cred.is_usable() is False
 
 
-def test_load_mi_token(tmp_path):
-    write(tmp_path / "mi.token", {
-        "userId": "42", "deviceId": "dev", "passToken": "pt",
-        "serviceToken": "st", "ssecurity": "ss",
-    })
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.user_id == "42"
-    assert cred.device_id == "dev"
-    assert cred.pass_token == "pt"
-    assert cred.service_token == "st"
-    assert cred.security == "ss"
 
 
-def test_load_manual_cookies_degraded(tmp_path):
-    write(tmp_path / "xiaoai_cookies.json", {
-        "cookies": {"userId": "7", "serviceToken": "tok"},
-        "username": "u", "login_time": "2026-01-01",
-    })
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.user_id == "7"
-    assert cred.service_token == "tok"
-    assert cred.pass_token == ""
-    assert cred.is_usable()
 
 
-def test_priority_new_format_over_mi_token(tmp_path):
-    write(tmp_path / "xiaoai_credentials.json",
-          {"user_id": "new", "service_token": "s1"})
-    write(tmp_path / "mi.token", {"userId": "old", "serviceToken": "s2"})
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.user_id == "new"
 
 
-def test_priority_mi_token_over_cookies(tmp_path):
-    write(tmp_path / "mi.token", {"userId": "42", "serviceToken": "st"})
-    write(tmp_path / "xiaoai_cookies.json",
-          {"cookies": {"userId": "7", "serviceToken": "tok"}})
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.user_id == "42"
 
 
-def test_corrupt_new_format_skipped(tmp_path):
+
+
+
+
+def test_corrupt_format_returns_none(tmp_path):
     (tmp_path / "xiaoai_credentials.json").write_text("{broken", encoding="utf-8")
-    write(tmp_path / "mi.token", {"userId": "42", "serviceToken": "st"})
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.user_id == "42"
+    assert CredentialStore(data_dir=str(tmp_path)).load() is None
 
 
-def test_corrupt_all_formats_returns_none(tmp_path):
-    (tmp_path / "xiaoai_credentials.json").write_text("{broken", encoding="utf-8")
-    (tmp_path / "mi.token").write_text("not json", encoding="utf-8")
-    (tmp_path / "xiaoai_cookies.json").write_text("[]", encoding="utf-8")
+def test_non_dict_json_returns_none(tmp_path):
+    (tmp_path / "xiaoai_credentials.json").write_text("[]", encoding="utf-8")
     assert CredentialStore(data_dir=str(tmp_path)).load() is None
 
 
@@ -105,12 +72,7 @@ def test_all_missing_returns_none(tmp_path):
     assert CredentialStore(data_dir=str(tmp_path)).load() is None
 
 
-def test_legacy_default_device_migration(tmp_path):
-    write(tmp_path / "mi.token", {"userId": "42", "serviceToken": "st"})
-    write(tmp_path / "xiaoai_token.json",
-          {"username": "u", "device_id": "speaker-1", "login_time": None})
-    cred = CredentialStore(data_dir=str(tmp_path)).load()
-    assert cred.default_device_id == "speaker-1"
+
 
 
 def test_mark_rejected(tmp_path):

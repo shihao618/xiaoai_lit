@@ -1,4 +1,4 @@
-"""凭证数据模型与本地持久化（三格式加载链 / 原子写入 / 失效标记）。"""
+"""凭证数据模型与本地持久化（单格式 / 原子写入 / 失效标记）。"""
 
 import json
 import logging
@@ -12,9 +12,6 @@ from lit import config
 logger = logging.getLogger(__name__)
 
 CREDENTIALS_FILENAME = "xiaoai_credentials.json"
-MI_TOKEN_FILENAME = "mi.token"
-XIAOAI_COOKIES_FILENAME = "xiaoai_cookies.json"
-XIAOAI_TOKEN_FILENAME = "xiaoai_token.json"
 
 _XIAOAI_SUBDIR = "xiaoai"
 
@@ -45,21 +42,8 @@ class CredentialStore:
         return os.path.join(self._data_dir, CREDENTIALS_FILENAME)
 
     def load(self) -> Optional[Credentials]:
-        """三格式加载链：新格式 → mi.token → 手动 Cookie。
-
-        任一格式解析失败跳过并尝试下一格式；三类文件均不存在返回 None。
-        xiaoai_token.json 的 device_id 迁移为 default_device_id。
-        """
-        cred = self._load_new_format()
-        if cred is None:
-            cred = self._load_mi_token()
-        if cred is None:
-            cred = self._load_manual_cookies()
-        if cred is None:
-            return None
-        if not cred.default_device_id:
-            cred.default_device_id = self._load_legacy_default_device()
-        return cred
+        """读取凭证文件；不存在/损坏/格式不符返回 None（不兼容旧格式）。"""
+        return self._load_new_format()
 
     def save(self, cred: Credentials) -> None:
         os.makedirs(self._data_dir, exist_ok=True)
@@ -140,48 +124,3 @@ class CredentialStore:
                 cred.refreshed_at = None
         logger.info("已加载小爱凭证文件（新格式）")
         return cred
-
-    def _load_mi_token(self) -> Optional[Credentials]:
-        data = self._read_json(MI_TOKEN_FILENAME)
-        if data is None:
-            return None
-        user_id = str(data.get("userId", "") or "")
-        service_token = str(data.get("serviceToken", "") or "")
-        if not user_id and not service_token:
-            return None
-        cred = Credentials(
-            user_id=user_id,
-            pass_token=str(data.get("passToken", "") or ""),
-            device_id=str(data.get("deviceId", "") or ""),
-            service_token=service_token,
-            security=data.get("ssecurity") or None,
-        )
-        logger.info("已加载小爱凭证文件（mi.token 存量格式）")
-        return cred
-
-    def _load_manual_cookies(self) -> Optional[Credentials]:
-        data = self._read_json(XIAOAI_COOKIES_FILENAME)
-        if data is None:
-            return None
-        cookies = data.get("cookies")
-        if not isinstance(cookies, dict):
-            return None
-        user_id = str(cookies.get("userId", "") or "")
-        service_token = str(cookies.get("serviceToken", "") or "")
-        if not user_id or not service_token:
-            return None
-        cred = Credentials(
-            user_id=user_id,
-            pass_token="",
-            device_id=str(cookies.get("deviceId", "") or ""),
-            service_token=service_token,
-        )
-        logger.info("已加载小爱凭证文件（手动 Cookie 降级格式，仅 serviceToken 可用）")
-        return cred
-
-    def _load_legacy_default_device(self) -> Optional[str]:
-        """存量 xiaoai_token.json 的 device_id 语义为已选默认音箱。"""
-        data = self._read_json(XIAOAI_TOKEN_FILENAME)
-        if data is None:
-            return None
-        return data.get("device_id") or None

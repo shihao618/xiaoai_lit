@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 
 from lit import config
-from lit.xiaoai import diagnostics, run_async
+from lit.xiaoai import diagnostics
 from lit.xiaoai.account import PollResult
 from lit.xiaoai.credentials import CredentialStore, Credentials
 from lit.xiaoai.exceptions import (
@@ -116,20 +116,6 @@ def no_sleep(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_diagnostics(monkeypatch):
     monkeypatch.setattr(diagnostics, "_records", deque(maxlen=10))
-
-
-# ---------- run_async 垫片 ----------
-
-def test_run_async_passthrough():
-    assert run_async("x") == "x"
-    assert run_async(None) is None
-    assert run_async([1, 2]) == [1, 2]
-
-
-def test_run_async_coroutine():
-    async def coro():
-        return 42
-    assert run_async(coro()) == 42
 
 
 # ---------- 状态机 ----------
