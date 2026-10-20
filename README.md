@@ -29,6 +29,8 @@ docker compose up -d --build
 
 登录成功后凭证自动持久化到命名卷，容器重启/掉线均自动恢复，无需重复登录。
 
+首次部署建议：配置 `XIAOAI_TTS_BASE_URL`（宿主机局域网地址，见 Configuration）后在页面"播报测试"现场听音核对，确认音箱真实出声。
+
 ## Configuration
 
 | 环境变量 | 默认值 | 说明 |
@@ -37,7 +39,7 @@ docker compose up -d --build
 | `JWXT_ACCOUNT` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
 | `JWXT_PASSWORD` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
 | `XNXQDM` | （空） | 学年学期代码（自动获取并缓存，通常无需配置） |
-| `XIAOAI_TTS_BASE_URL` | （空） | 小爱 TTS 服务地址（空 = 自动获取） |
+| `XIAOAI_TTS_BASE_URL` | （空） | 小爱音箱拉流音频的基地址，形如 `http://<宿主机局域网IP>:10379`（**必配**）。留空 = 本地 TTS 主通道禁用，播报依赖原生 TTS 回退通道——L05B/L05C 等型号会被服务端静默忽略（页面提示成功但音箱无声）。注意：①不能配置为 localhost/127.0.0.1（音箱经局域网拉流，容器回环地址对音箱不可达）；②DHCP 动态 IP 环境下宿主机 IP 变更后需同步更新本配置并重启容器 |
 | `XIAOAI_TTS_BACKUP_URL` | （空） | 小爱 TTS 备用地址 |
 | `REMIND_BEFORE_MINUTES` | `30` | 提醒提前量（分钟） |
 | `COOKIE_REFRESH_INTERVAL` | `3600` | Cookie 检查间隔（秒） |
@@ -128,7 +130,7 @@ volumes:
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/    # 当前基线：230 用例
+python -m pytest tests/    # 当前基线：270 用例（xiaoai_silent_play 后 V1 实测固化）
 ```
 
 ## Security
@@ -146,3 +148,4 @@ python -m pytest tests/    # 当前基线：230 用例
 | 教务接口异常 | 自动缓存降级：当日缓存有效时按缓存提醒（宁可多提醒不可停提醒）；跨周缓存自动弃用，不会播报过期课表 |
 | Windows 宿主目录直接挂载（bind mount）失败 | 本项目仅支持命名卷部署（non-root 运行 + Windows 权限语义限制），不提供以 root 运行的降级方案 |
 | 周次徽章显示"学期外" | 寒暑假正常显示（教务接口无当日教学周数据）；开学后自动恢复为"第 N 周" |
+| 播报提示成功但音箱无声 | ①核对 `XIAOAI_TTS_BASE_URL` 已配置为宿主机局域网地址（最常见）②页面"播报诊断"查看最近播报（通道/分级/警示/自检状态）③设备列表核对 hardware 型号与"音箱"标注④现场听音核对（部分型号播放状态固件不可靠，系统无法自动确认出声） |

@@ -1,6 +1,7 @@
 """应用工厂：装配业务对象、注册 5 蓝图、启动后台任务（D6，装配顺序冻结）。"""
 import logging
 import os
+import threading
 
 from flask import Flask
 
@@ -13,8 +14,12 @@ from lit.web.blueprints.pages import create_pages_blueprint
 from lit.web.blueprints.status import create_status_blueprint
 from lit.web.blueprints.xiaoai import create_xiaoai_blueprint
 from lit.xiaoai import XiaoAISpeaker
+from lit.xiaoai import diagnostics
+from lit.xiaoai.tts import log_base_url_warnings
 
 logger = logging.getLogger(__name__)
+
+APP_PORT = 10379
 
 
 def create_app():
@@ -30,6 +35,9 @@ def create_app():
     app.register_blueprint(create_audio_blueprint())
     app.register_blueprint(create_status_blueprint(jwxt_client, xiaoai_speaker))
     xiaoai_speaker.restore_on_start()
+    log_base_url_warnings()
+    threading.Thread(target=diagnostics.run_audio_self_check,
+                     daemon=True, name="xiaoai-audio-self-check").start()
     try:
         tasks.start()
     except Exception as e:

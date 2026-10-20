@@ -1,8 +1,9 @@
-"""小爱音箱蓝图：/api/xiaoai/* 7 条路由（契约冻结自 app.py）。"""
+"""小爱音箱蓝图：/api/xiaoai/* 8 条路由（契约冻结自 app.py）。"""
 import logging
 
 from flask import Blueprint, jsonify, request
 
+from lit.xiaoai import diagnostics
 from lit.xiaoai.exceptions import QRSessionError
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,11 @@ def create_xiaoai_blueprint(xiaoai_speaker):
         if not device_id:
             return jsonify({"success": False, "message": "设备ID为空"})
 
-        xiaoai_speaker.select_device(device_id)
-        return jsonify({"success": True, "message": "设备已选择"})
+        result = xiaoai_speaker.select_device(device_id)
+        resp = {"success": True, "message": "设备已选择", "device": result}
+        if result.get("warning"):
+            resp["warning"] = result["warning"]
+        return jsonify(resp)
 
     @bp.route("/status")
     def status():
@@ -66,9 +70,30 @@ def create_xiaoai_blueprint(xiaoai_speaker):
         if not text and not url:
             return jsonify({"success": False, "message": "text 与 url 至少一项非空"})
         if not text and url:
-            ok, message = xiaoai_speaker.play_url_direct(url)
-            return jsonify({"success": ok, "message": message})
-        ok, message = xiaoai_speaker.speak_with_result(text, backup_url=url or None)
-        return jsonify({"success": ok, "message": message})
+            ok, message, detail = xiaoai_speaker.play_url_direct(url)
+        else:
+            ok, message, detail = xiaoai_speaker.speak_with_detail(
+                text, backup_url=url or None)
+        return jsonify({
+            "success": ok,
+            "message": message,
+            "grade": detail.get("grade"),
+            "grade_label": detail.get("grade_label"),
+            "channel": detail.get("channel"),
+            "warnings": detail.get("warnings") or [],
+            "device": detail.get("device") or {},
+            "synth": detail.get("synth") or {},
+            "observation": detail.get("observation") or {},
+        })
+
+    @bp.route("/broadcasts")
+    def broadcasts():
+        records = diagnostics.get_broadcasts()
+        return jsonify({
+            "success": True,
+            "count": len(records),
+            "broadcasts": records,
+            "audio_self_check": diagnostics.self_check_status(),
+        })
 
     return bp

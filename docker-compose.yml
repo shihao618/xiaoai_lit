@@ -9,7 +9,9 @@ services:
       - JWXT_BASE_URL=https://lljw.lit.edu.cn
       - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}          # 引导/回退凭证（持久化优先，见 README）
       - JWXT_PASSWORD=${JWXT_PASSWORD:-}
-      - XIAOAI_TTS_BASE_URL=
+      # 小爱音箱拉流基地址 http://<宿主机局域网IP>:10379
+      # 留空=主通道禁用（L05B/L05C 型号播报无声），见 README
+      - XIAOAI_TTS_BASE_URL=${XIAOAI_TTS_BASE_URL:-}
       - XIAOAI_TTS_BACKUP_URL=
       - REMIND_BEFORE_MINUTES=30
       - LOG_LEVEL=INFO

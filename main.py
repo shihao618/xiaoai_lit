@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 def main():
     logger.info("=== LIT 课表提醒服务启动 ===")
     from lit.web import create_app
+    from lit.web.app import APP_PORT
     app = create_app()
-    app.run(host="0.0.0.0", port=10379, debug=False)
+    app.run(host="0.0.0.0", port=APP_PORT, debug=False)
 
 
 if __name__ == "__main__":

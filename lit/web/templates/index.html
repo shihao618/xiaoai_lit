@@ -125,6 +125,11 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 </div>
 </div>
 
+<div class="card">
+<h2><span class="icon" style="background:#e8f0fe;color:#1967d2">诊</span>播报诊断 <span id="selfcheck-badge" class="status-badge status-warn">自检未知</span></h2>
+<div id="broadcast-list" style="margin-top:12px"></div>
+</div>
+
 <script>
 const API = '';
 let selectedDeviceId = null;
@@ -285,7 +290,7 @@ const item = document.createElement('div');
 item.className = 'device-item' + (d.deviceID === selectedDeviceId ? ' selected' : '');
 item.dataset.deviceId = d.deviceID;
 const hw = d.hardware || '';
-const isSpeaker = hw.startsWith('L') || hw.includes('speaker') || hw.includes('Sound') || d.name.includes('小爱') || d.name.includes('音箱');
+const isSpeaker = d.is_speaker;
 const speakerTag = isSpeaker ? '<span style="color:#137333;font-size:11px;background:#e6f4ea;padding:2px 6px;border-radius:4px;margin-left:6px">音箱</span>' : '<span style="color:#b06000;font-size:11px;background:#fef7e0;padding:2px 6px;border-radius:4px;margin-left:6px">非音箱</span>';
 item.innerHTML = `
 <div>
@@ -305,7 +310,11 @@ const r = await api('/api/xiaoai/select_device', {method:'POST', body:JSON.strin
 if (r.success) {
 document.querySelectorAll('.device-item').forEach(el => el.classList.remove('selected'));
 if (itemEl) itemEl.classList.add('selected');
+if (r.warning) {
+showAlert('xiaoai-alert', 'warning', r.warning);
+} else {
 showAlert('xiaoai-alert', 'success', '设备已选择');
+}
 }
 }
 
@@ -333,11 +342,71 @@ async function testSpeak() {
 const text = document.getElementById('test-text').value;
 showAlert('xiaoai-alert', 'info', '正在播报...');
 const r = await api('/api/xiaoai/test', {method:'POST', body:JSON.stringify({text})});
-if (r.success) {
-showAlert('xiaoai-alert', 'success', '播报成功！');
-} else {
-showAlert('xiaoai-alert', 'danger', '播报失败，请检查小爱音箱是否已登录');
+if (r.grade === 1) {
+showAlert('xiaoai-alert', 'success', '播报成功（已确认播放）');
+} else if (r.grade === 2) {
+const channelNames = {primary: '本地TTS主通道', mibrain: '原生TTS回退', backup: '备份地址'};
+let detail = `<br>通道：${channelNames[r.channel] || r.channel || '未知'}`;
+if (r.warnings && r.warnings.length) {
+detail += '<br>警示：' + r.warnings.map(w => `<br>⚠ ${w}`).join('');
 }
+showAlert('xiaoai-alert', 'warning', `${r.grade_label || '指令已接受未确认播放'}，请现场听音核对${detail}`);
+} else {
+showAlert('xiaoai-alert', 'danger', '播报失败：' + (r.message || '请检查小爱音箱是否已登录'));
+}
+loadBroadcasts();
+}
+
+const CHANNEL_NAMES = {primary: '本地TTS主通道', mibrain: '原生TTS回退', backup: '备份地址', none: '未发出'};
+
+async function loadBroadcasts() {
+let r;
+try {
+r = await api('/api/xiaoai/broadcasts');
+} catch (e) {
+return;
+}
+const sc = r.audio_self_check || {};
+const scBadge = document.getElementById('selfcheck-badge');
+if (sc.status === 'ok') {
+scBadge.className = 'status-badge status-ok';
+scBadge.textContent = '音频自检通过';
+} else if (sc.status === 'failed') {
+scBadge.className = 'status-badge status-fail';
+scBadge.textContent = '音频自检失败';
+} else {
+scBadge.className = 'status-badge status-warn';
+scBadge.textContent = '音频自检未知';
+}
+const list = document.getElementById('broadcast-list');
+if (!r.count) {
+list.innerHTML = '<div class="alert alert-info">暂无播报记录（每次播报后自动记录，重启后清空）</div>';
+return;
+}
+const gradeStyles = {1: 'status-ok', 2: 'status-warn', 3: 'status-fail'};
+let html = '';
+(r.broadcasts || []).forEach(b => {
+const dev = b.device || {};
+const synth = b.synth || {};
+const obs = b.observation || {};
+const t = b.timestamp ? new Date(b.timestamp).toLocaleString('zh-CN') : '';
+let line = `<div style="border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:13px">`;
+line += `<div><span class="status-badge ${gradeStyles[b.grade] || 'status-fail'}">${b.grade_label || '播报失败'}</span> <span style="color:#999">${t}</span> <span style="color:#666">${CHANNEL_NAMES[b.channel] || b.channel || ''}</span></div>`;
+line += `<div style="color:#666;margin-top:4px">设备：${dev.name || '未知'}（${dev.hardware || '未知型号'}）</div>`;
+if (synth.elapsed !== undefined && synth.elapsed !== null) {
+line += `<div style="color:#666">合成：${synth.ok ? '完成' : '失败'}，耗时 ${synth.elapsed}s${synth.duration ? '，音频 ' + synth.duration + 's' : ''}</div>`;
+}
+const obsParts = [];
+if (obs.saw_playing) obsParts.push('观察到播放中');
+if (obs.last_state) obsParts.push('末次状态 ' + obs.last_state);
+if (obs.poll_count !== undefined) obsParts.push('轮询 ' + obs.poll_count + ' 次');
+if (obs.note) obsParts.push(obs.note);
+if (obsParts.length) line += `<div style="color:#666">观察：${obsParts.join('；')}</div>`;
+(b.warnings || []).forEach(w => { line += `<div style="color:#b06000">⚠ ${w}</div>`; });
+line += '</div>';
+html += line;
+});
+list.innerHTML = html;
 }
 
 
@@ -365,6 +434,7 @@ return s;
 (async () => {
 const s = await loadStatus();
 loadTermStatus();
+loadBroadcasts();
 if (s && !s.jwxt.cookie_valid && !s.jwxt.locked) {
     await loadCaptcha();
 }
