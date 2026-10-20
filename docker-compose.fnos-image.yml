@@ -1,0 +1,58 @@
+# 洛阳理工学院课表提醒服务 —— 飞牛 OS（fnOS）免构建安装（直接拉取预构建镜像）
+#
+# 镜像由 GitHub Actions 在推送 v* 标签时自动构建并发布到 GHCR：
+#   ghcr.io/shihao618/xiaoai_lit:latest
+# 使用：fnOS 应用中心 → Docker → Compose → 新建项目，工作目录选本仓库目录，
+#      Compose 文件选 docker-compose.fnos-image.yml，启动（无需构建）。
+#
+# 首次使用如提示拉取无权限：GitHub → Packages → 该镜像包 → Package settings →
+# Change visibility → Public；或 NAS 执行 docker login ghcr.io 后重试。
+#
+# 说明：播报走云端 MIoT 原生文字播报，NAS 无需固定 IP、无需额外端口放行；
+#      10379 仅 Web 管理页使用，可用 WEB_PORT 修改。
+
+services:
+  lit-course-reminder:
+    image: ${LIT_IMAGE:-ghcr.io/shihao618/xiaoai_lit:latest}
+    container_name: lit-course-reminder
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - "no-new-privileges:true"
+    stop_grace_period: 35s
+    ports:
+      - "${WEB_PORT:-10379}:10379"
+    environment:
+      - JWXT_BASE_URL=${JWXT_BASE_URL:-https://lljw.lit.edu.cn}
+      - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}
+      - JWXT_PASSWORD=${JWXT_PASSWORD:-}
+      - REMIND_BEFORE_MINUTES=${REMIND_BEFORE_MINUTES:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # 可选：Cookie 检查间隔（秒，默认 1800 = 30 分钟）
+      # - COOKIE_REFRESH_INTERVAL=1800
+      - CACHE_DIR=/app/cache
+      - DATA_DIR=/app/data
+    volumes:
+      - lit-data:/app/data
+      - lit-cache:/app/cache
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:10379/api/status', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lit-data:
+    name: lit_lit-data
+  lit-cache:
+    name: lit_lit-cache

@@ -1,5 +1,6 @@
 # ---------- 版本控制 / IDE / 工具链元数据 ----------
 .git/
+.github/
 .gitignore
 .arts/
 .codeartsdoer/

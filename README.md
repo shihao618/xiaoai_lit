@@ -32,7 +32,9 @@ lit/web/             Flask 应用工厂 + 4 个蓝图 + templates/index.html
 lit/tasks.py         单调度器后台任务（课表刷新/提醒/Cookie 检查/缓存清理）
 tests/               单元测试（jwxt / xiaoai / 任务调度），fixtures/ 存放脱敏样本
 Dockerfile           多阶段镜像构建；docker-compose.yml 单容器编排
-docker-compose.fnos.yml  飞牛OS（fnOS）专用编排（命名卷显式固定、start_period 90s）
+docker-compose.fnos.yml  飞牛OS（fnOS）构建安装编排（命名卷显式固定、start_period 90s）
+docker-compose.fnos-image.yml  飞牛OS 免构建安装（直接拉取 GHCR 预构建镜像）
+.github/workflows/release.yml  推送 v* 标签自动构建镜像 + 发布 GitHub Release
 requirements.txt     生产依赖（固定版本）；requirements-dev.txt 追加 pytest
 ```
 
@@ -63,11 +65,35 @@ docker compose up -d --build
 
 首次部署建议：在页面"播报测试"现场听音核对，确认音箱真实出声（若用的是 `miot` 原生通道，无需配置任何 IP）。
 
+## 预构建镜像（免构建安装）
+
+推送 `v*` 标签时，GitHub Actions 会自动构建镜像、推送 GHCR，并创建 GitHub Release：
+
+| 用途 | 镜像地址 |
+|---|---|
+| 最新 | `ghcr.io/shihao618/xiaoai_lit:latest` |
+| 指定版本 | `ghcr.io/shihao618/xiaoai_lit:vX.Y.Z` |
+
+```bash
+docker pull ghcr.io/shihao618/xiaoai_lit:latest
+```
+
+飞牛 OS 免构建安装：使用 [docker-compose.fnos-image.yml](docker-compose.fnos-image.yml)（镜像地址可用 `LIT_IMAGE` 覆盖）。
+
+> 首次拉取若提示无权限：GHCR 镜像包默认私有，需到 GitHub → 个人/仓库 → Packages → 该镜像包 → Package settings → Change visibility → **Public**；或 NAS 上执行 `docker login ghcr.io`（用户名 GitHub 账号，密码用具备 `read:packages` 权限的 PAT）。
+>
+> 镜像平台为 **linux/amd64**（x86_64 NAS）。自行构建请见 Quick Start / 飞牛OS 章节。
+
 ## 飞牛 OS（fnOS）部署
 
-仓库提供 fnOS 专用编排 [docker-compose.fnos.yml](docker-compose.fnos.yml)：命名卷显式固定为 `lit_lit-data` / `lit_lit-cache`，升级重建不丢数据；播报走云端，无需在 NAS 上额外放行任何局域网地址。
+仓库提供两份 fnOS 专用编排：
 
-### 方式 A：NAS 上直接构建（推荐）
+- **免构建（推荐）**：[docker-compose.fnos-image.yml](docker-compose.fnos-image.yml) —— 直接拉取 GHCR 预构建镜像，NAS 零构建
+- **NAS 构建**：[docker-compose.fnos.yml](docker-compose.fnos.yml) —— 本地从源码构建（无外网镜像仓库时使用）
+
+两份编排均把命名卷显式固定为 `lit_lit-data` / `lit_lit-cache`，升级重建不丢数据；播报走云端，无需在 NAS 上额外放行任何局域网地址。
+
+### 方式 A：NAS 上直接构建
 
 1. 将本仓库上传/解压到 NAS 存储目录，例如 `/vol1/1000/docker/lit-course-reminder`
 2. fnOS 应用中心 → Docker → Compose → 新建项目：
