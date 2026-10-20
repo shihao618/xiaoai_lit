@@ -38,6 +38,7 @@ tests/               单元测试（jwxt / xiaoai / 任务调度），fixtures/ 
 Dockerfile           多阶段镜像构建；docker-compose.yml 单容器编排
 docker-compose.fnos.yml  飞牛OS（fnOS）构建安装编排（命名卷显式固定、start_period 90s）
 docker-compose.fnos-image.yml  飞牛OS 免构建安装（直接拉取 GHCR 预构建镜像）
+docker-compose.fnos.env.example  fnOS 环境变量模板（复制为 .env）
 .github/workflows/tests.yml  push/PR 自动跑测试（发布门禁）
 .github/workflows/release.yml  推送 v* 标签自动构建镜像 + 发布 GitHub Release
 requirements.txt     生产依赖（固定版本）；requirements-dev.txt 追加 pytest
@@ -83,7 +84,7 @@ docker compose up -d --build
 docker pull ghcr.io/shihao618/xiaoai_lit:latest
 ```
 
-飞牛 OS 免构建安装：使用 [docker-compose.fnos-image.yml](docker-compose.fnos-image.yml)（镜像地址可用 `LIT_IMAGE` 覆盖）。
+飞牛 OS 免构建安装：使用 [docker-compose.fnos-image.yml](docker-compose.fnos-image.yml)（数据落在项目目录下 `data/`、`cache/`；镜像地址可用 `LIT_IMAGE` 覆盖）。
 
 > 首次拉取若提示无权限：GHCR 镜像包默认私有，需到 GitHub → 个人/仓库 → Packages → 该镜像包 → Package settings → Change visibility → **Public**；或 NAS 上执行 `docker login ghcr.io`（用户名 GitHub 账号，密码用具备 `read:packages` 权限的 PAT）。
 >
@@ -91,42 +92,59 @@ docker pull ghcr.io/shihao618/xiaoai_lit:latest
 
 ## 飞牛 OS（fnOS）部署
 
-仓库提供两份 fnOS 专用编排：
+fnOS 是 NAS 系统，**持久化数据需要落在 NAS 的本地目录**（文件管理器可见、可直接备份/迁移），因此两份 fnOS 编排使用**项目目录下的本地目录**，而不是 Docker 命名卷：
+
+| 容器内路径 | NAS 本地目录（默认） | 内容 |
+|---|---|---|
+| `/app/data` | `<项目目录>/data` | 教务凭证/状态/锁定记录、小爱凭证、MIoT 令牌 |
+| `/app/cache` | `<项目目录>/cache` | 教务课表接口缓存 |
 
 - **免构建（推荐）**：[docker-compose.fnos-image.yml](docker-compose.fnos-image.yml) —— 直接拉取 GHCR 预构建镜像，NAS 零构建
-- **NAS 构建**：[docker-compose.fnos.yml](docker-compose.fnos.yml) —— 本地从源码构建（无外网镜像仓库时使用）
+- **NAS 构建**：[docker-compose.fnos.yml](docker-compose.fnos.yml) —— 从源码构建（无外网镜像仓库时使用）
+- 容器以 `PUID:PGID`（默认 `1000:1000`，即 fnOS 默认用户）运行，保证能写本地目录
+- 可用 `DATA_PATH` / `CACHE_PATH` 把数据放到绝对路径（如 `/vol1/1000/docker/lit-data`）
+- 环境变量模板：[docker-compose.fnos.env.example](docker-compose.fnos.env.example)（复制为 `.env`）
+- 播报走云端 MIoT，NAS 无需固定 IP、无需额外端口放行（10379 仅 Web 管理页）
 
-两份编排均把命名卷显式固定为 `lit_lit-data` / `lit_lit-cache`，升级重建不丢数据；播报走云端，无需在 NAS 上额外放行任何局域网地址。
-
-### 方式 A：NAS 上直接构建
-
-1. 将本仓库上传/解压到 NAS 存储目录，例如 `/vol1/1000/docker/lit-course-reminder`
-2. fnOS 应用中心 → Docker → Compose → 新建项目：
-   - 工作目录：上面的仓库目录
-   - Compose 文件：`docker-compose.fnos.yml`
-   - 构建并启动（首次构建需下载基础镜像与依赖，NAS 约 5~10 分钟）
-3. 浏览器打开 `http://<NAS 局域网 IP>:10379`，按页面登录教务、扫码登录小爱
-4. 若从旧部署迁移：先 `docker rm -f lit-course-reminder` 再启动本编排（命名卷同名，凭证数据保留）
-
-### 方式 B：电脑构建后导入（NAS 性能较弱时）
+### 前置：创建本地持久化目录（必须）
 
 ```bash
-# 电脑（同架构）构建并导出镜像
-docker compose build
-docker save lit-course-reminder:latest -o lit-course-reminder.tar
-# 复制到 NAS 后导入，并用 fnOS 编排启动（跳过构建）
-docker load -i lit-course-reminder.tar
-docker compose -f docker-compose.fnos.yml up -d --no-build
+# 在项目目录（compose 文件所在目录）执行；
+# 也可用 fnOS 文件管理器新建 data、cache 两个文件夹（属主默认就是当前用户）。
+mkdir -p data cache
+chown -R 1000:1000 data cache   # fnOS 默认用户 1000:1000；不同请按 `id -u`/`id -g` 修改
 ```
 
-### 端口 / 数据 / 升级
+> 不要交给 Docker 自动创建：自动创建的宿主目录属主是 root，容器内非 root 用户会写入失败（Permission denied）。
 
-- 端口：默认 `10379`，可在 `.env` 或 docker-compose.fnos.yml 同目录创建 `.env` 设置 `WEB_PORT=xxxx` 修改
-- 数据：命名卷 `lit_lit-data`（凭证/状态/MIoT 令牌）与 `lit_lit-cache`（课表缓存），位于 NAS Docker 数据目录
-- 备份：`docker cp lit-course-reminder:/app/data ./backup-data`；恢复步骤见下方 Volumes
-- 升级：替换代码目录后重新构建项目（方式 B 则重新 load 镜像）再启动即可
-- 播报不需要局域网 IP / 拉流，NAS 无需固定 IP，也不需要在路由器上做端口转发
-- fnOS 目前以 x86_64 机型为主；ARM 机型请自行验证依赖 wheel 可用性
+### 方式 A：免构建（推荐，拉取预构建镜像）
+
+1. 在 NAS 建项目目录，例如 `/vol1/1000/docker/lit-course-reminder`，把 [docker-compose.fnos-image.yml](docker-compose.fnos-image.yml) 复制进去（可改名为 `docker-compose.yml`）
+2. 创建 `data/`、`cache/` 并确认属主（见上）
+3. fnOS 应用中心 → Docker → Compose → 新建项目，选择该目录与 compose 文件，启动（自动拉取镜像）
+4. 浏览器打开 `http://<NAS 局域网 IP>:10379`，按页面登录教务、扫码登录小爱
+
+### 方式 B：从源码构建
+
+1. 将本仓库上传/解压到 NAS 项目目录，例如 `/vol1/1000/docker/lit-course-reminder`
+2. 创建 `data/`、`cache/` 并确认属主
+3. fnOS Docker → Compose → 新建项目：工作目录选仓库目录，Compose 文件选 `docker-compose.fnos.yml`，构建并启动（首次约 5~10 分钟）
+4. NAS 性能较弱时：可在电脑上 `docker compose -f docker-compose.fnos.yml build` 后 `docker save`，NAS `docker load`，再用免构建编排启动
+
+### 数据 / 备份 / 升级
+
+- **数据目录**：`<项目目录>/data`（或 `DATA_PATH` 指定目录），fnOS 文件管理器可直接查看、打包备份
+- 备份：`tar czf lit-data-backup.tgz data cache`；恢复：解压回项目目录后重启容器
+- 升级（免构建）：修改 `LIT_IMAGE` 版本或重新 `docker pull latest` → 重启项目；数据目录不变
+- 升级（源码）：替换代码后重新构建项目即可
+- **从旧的命名卷迁移**（之前用普通 docker-compose 部署过）：
+  ```bash
+  mkdir -p data cache
+  docker run --rm -v lit_lit-data:/from -v "$PWD/data":/to alpine sh -c "cp -a /from/. /to/"
+  docker run --rm -v lit_lit-cache:/from -v "$PWD/cache":/to alpine sh -c "cp -a /from/. /to/"
+  chown -R 1000:1000 data cache
+  ```
+- 说明：仓库根目录 `docker-compose.yml`（通用/本机）仍使用命名卷；fnOS 两份编排改用本地目录
 
 ## Configuration
 

@@ -1,15 +1,22 @@
-# 洛阳理工学院课表提醒服务 —— 飞牛 OS（fnOS）免构建安装（直接拉取预构建镜像）
+# 洛阳理工学院课表提醒服务 —— 飞牛 OS（fnOS）本地目录持久化 + 免构建（拉取 GHCR 镜像）
 #
-# 镜像由 GitHub Actions 在推送 v* 标签时自动构建并发布到 GHCR：
+# 镜像由 GitHub Actions 在推送 v* 标签时自动发布：
 #   ghcr.io/shihao618/xiaoai_lit:latest
-# 使用：fnOS 应用中心 → Docker → Compose → 新建项目，工作目录选本仓库目录，
-#      Compose 文件选 docker-compose.fnos-image.yml，启动（无需构建）。
 #
-# 首次使用如提示拉取无权限：GitHub → Packages → 该镜像包 → Package settings →
-# Change visibility → Public；或 NAS 执行 docker login ghcr.io 后重试。
+# 使用（fnOS 应用中心 → Docker → Compose → 新建项目）：
+#   1) 新建项目目录（如 /vol1/1000/docker/lit-course-reminder），把本文件放到该目录
+#   2) 先创建本地持久化目录（属主为 NAS 用户）：
+#        mkdir -p data cache
+#   3) Compose 文件选 docker-compose.fnos-image.yml，启动（自动拉取镜像，无需构建）
 #
-# 说明：播报走云端 MIoT 原生文字播报，NAS 无需固定 IP、无需额外端口放行；
-#      10379 仅 Web 管理页使用，可用 WEB_PORT 修改。
+# 数据持久化（本编排的核心区别）：
+#   左侧是 NAS 上的真实目录（默认 ./data、./cache，相对项目目录），
+#   可在 .env 用 DATA_PATH / CACHE_PATH 覆盖为绝对路径（如 /vol1/1000/docker/lit/data）。
+#   容器以 PUID:PGID（默认 1000:1000，即 fnOS 默认用户）运行，保证能写入这些目录。
+#   注意：目录必须提前创建；若由 Docker 自动创建会归 root 所有，容器将无法写入。
+#
+# 首次拉取若提示无权限：GitHub → Packages → 该镜像包 → Package settings →
+# Change visibility → Public；或 NAS 执行 docker login ghcr.io。
 
 services:
   lit-course-reminder:
@@ -20,6 +27,8 @@ services:
     security_opt:
       - "no-new-privileges:true"
     stop_grace_period: 35s
+    # 以 NAS 用户身份运行（fnOS 默认 UID/GID 1000），保证本地持久化目录可写且文件属主正确
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "${WEB_PORT:-10379}:10379"
     environment:
@@ -32,9 +41,12 @@ services:
       # - COOKIE_REFRESH_INTERVAL=1800
       - CACHE_DIR=/app/cache
       - DATA_DIR=/app/data
+      # onnxruntime 等第三方库需要可写 HOME，避免只读告警
+      - HOME=/tmp
     volumes:
-      - lit-data:/app/data
-      - lit-cache:/app/cache
+      # 本地持久化目录：默认在项目目录下，可用 .env 的 DATA_PATH / CACHE_PATH 覆盖
+      - ${DATA_PATH:-./data}:/app/data
+      - ${CACHE_PATH:-./cache}:/app/cache
     healthcheck:
       test:
         - CMD
@@ -50,9 +62,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  lit-data:
-    name: lit_lit-data
-  lit-cache:
-    name: lit_lit-cache
