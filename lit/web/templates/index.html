@@ -87,7 +87,6 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 </details>
 
 </div>
-</div>
 
 <div class="card">
 <h2><span class="icon" style="background:#e6f4ea;color:#137333">爱</span>小爱音箱登录 <span id="xiaoai-badge" class="status-badge status-warn">未登录</span></h2>
@@ -102,8 +101,10 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 </div>
 
 <div id="device-section" class="hidden">
-<h3 style="margin:16px 0 8px;font-size:15px">选择小爱音箱设备</h3>
+<details id="device-collapse">
+<summary style="margin:16px 0 8px;font-size:15px;cursor:pointer">选择小爱音箱设备 <span id="device-selected-summary" style="font-size:12px;color:#999;margin-left:8px"></span></summary>
 <div id="device-list" class="device-list"></div>
+</details>
 </div>
 
 </div>
@@ -126,13 +127,16 @@ h1 { text-align: center; margin: 20px 0; color: #1a73e8; font-size: 24px; }
 </div>
 
 <div class="card">
-<h2><span class="icon" style="background:#e8f0fe;color:#1967d2">诊</span>播报诊断 <span id="selfcheck-badge" class="status-badge status-warn">自检未知</span></h2>
+<h2><span class="icon" style="background:#e8f0fe;color:#1967d2">诊</span>播报诊断 <span class="status-badge status-ok">云端原生播报</span></h2>
 <div id="broadcast-list" style="margin-top:12px"></div>
+</div>
+
 </div>
 
 <script>
 const API = '';
 let selectedDeviceId = null;
+let deviceListCache = [];
 
 async function api(url, opts={}) {
 const r = await fetch(API+url, {headers:{'Content-Type':'application/json'}, ...opts});
@@ -159,6 +163,31 @@ if (jwxtFormLastActive === null || active !== jwxtFormLastActive) {
 el.open = !active;
 }
 jwxtFormLastActive = active;
+}
+
+function renderDeviceSummary(devices) {
+const span = document.getElementById('device-selected-summary');
+if (!span) return;
+const dev = (devices || []).find(d => d.deviceID === selectedDeviceId);
+if (!dev) { span.textContent = '未选择设备'; return; }
+const name = dev.name || '未知设备';
+span.textContent = dev.hardware ? `${name}（${dev.hardware}）` : name;
+}
+
+function applyDeviceCollapseInitial(devices, source) {
+const el = document.getElementById('device-collapse');
+if (!el) return;
+let open;
+if (source === 'qr') {
+open = true;
+} else if (!devices || !devices.length) {
+open = true;
+} else if (selectedDeviceId) {
+open = false;
+} else {
+open = true;
+}
+el.open = open;
 }
 
 async function loadStatus() {
@@ -262,7 +291,7 @@ async function pollQrStatus() {
             document.getElementById('qr-section').classList.add('hidden');
             showAlert('xiaoai-alert', 'success', '小爱音箱登录成功！');
             setBadge('xiaoai-badge', true);
-            if (st.devices && st.devices.length) showDevices(st.devices);
+            showDevices(st.devices, 'qr');
             loadStatus();
         } else if (st.status === 'expired') {
             clearInterval(qrPollTimer); qrPollTimer = null;
@@ -277,9 +306,12 @@ async function pollQrStatus() {
     }, 2000);
 }
 
-function showDevices(devices) {
+function showDevices(devices, source = 'init') {
 const list = document.getElementById('device-list');
 document.getElementById('device-section').classList.remove('hidden');
+deviceListCache = devices || [];
+renderDeviceSummary(deviceListCache);
+applyDeviceCollapseInitial(deviceListCache, source);
 list.innerHTML = '';
 if (!devices || !devices.length) {
 list.innerHTML = '<div class="alert alert-warning">未找到设备</div>';
@@ -310,6 +342,7 @@ const r = await api('/api/xiaoai/select_device', {method:'POST', body:JSON.strin
 if (r.success) {
 document.querySelectorAll('.device-item').forEach(el => el.classList.remove('selected'));
 if (itemEl) itemEl.classList.add('selected');
+renderDeviceSummary(deviceListCache);
 if (r.warning) {
 showAlert('xiaoai-alert', 'warning', r.warning);
 } else {
@@ -345,7 +378,7 @@ const r = await api('/api/xiaoai/test', {method:'POST', body:JSON.stringify({tex
 if (r.grade === 1) {
 showAlert('xiaoai-alert', 'success', '播报成功（已确认播放）');
 } else if (r.grade === 2) {
-const channelNames = {primary: '本地TTS主通道', mibrain: '原生TTS回退', backup: '备份地址'};
+const channelNames = {miot: '原生文字播报', mibrain: 'mibrain 回退'};
 let detail = `<br>通道：${channelNames[r.channel] || r.channel || '未知'}`;
 if (r.warnings && r.warnings.length) {
 detail += '<br>警示：' + r.warnings.map(w => `<br>⚠ ${w}`).join('');
@@ -357,7 +390,7 @@ showAlert('xiaoai-alert', 'danger', '播报失败：' + (r.message || '请检查
 loadBroadcasts();
 }
 
-const CHANNEL_NAMES = {primary: '本地TTS主通道', mibrain: '原生TTS回退', backup: '备份地址', none: '未发出'};
+const CHANNEL_NAMES = {miot: '原生文字播报', mibrain: 'mibrain 回退', none: '未发出'};
 
 async function loadBroadcasts() {
 let r;
@@ -365,18 +398,6 @@ try {
 r = await api('/api/xiaoai/broadcasts');
 } catch (e) {
 return;
-}
-const sc = r.audio_self_check || {};
-const scBadge = document.getElementById('selfcheck-badge');
-if (sc.status === 'ok') {
-scBadge.className = 'status-badge status-ok';
-scBadge.textContent = '音频自检通过';
-} else if (sc.status === 'failed') {
-scBadge.className = 'status-badge status-fail';
-scBadge.textContent = '音频自检失败';
-} else {
-scBadge.className = 'status-badge status-warn';
-scBadge.textContent = '音频自检未知';
 }
 const list = document.getElementById('broadcast-list');
 if (!r.count) {
@@ -387,15 +408,11 @@ const gradeStyles = {1: 'status-ok', 2: 'status-warn', 3: 'status-fail'};
 let html = '';
 (r.broadcasts || []).forEach(b => {
 const dev = b.device || {};
-const synth = b.synth || {};
 const obs = b.observation || {};
 const t = b.timestamp ? new Date(b.timestamp).toLocaleString('zh-CN') : '';
 let line = `<div style="border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:13px">`;
 line += `<div><span class="status-badge ${gradeStyles[b.grade] || 'status-fail'}">${b.grade_label || '播报失败'}</span> <span style="color:#999">${t}</span> <span style="color:#666">${CHANNEL_NAMES[b.channel] || b.channel || ''}</span></div>`;
 line += `<div style="color:#666;margin-top:4px">设备：${dev.name || '未知'}（${dev.hardware || '未知型号'}）</div>`;
-if (synth.elapsed !== undefined && synth.elapsed !== null) {
-line += `<div style="color:#666">合成：${synth.ok ? '完成' : '失败'}，耗时 ${synth.elapsed}s${synth.duration ? '，音频 ' + synth.duration + 's' : ''}</div>`;
-}
 const obsParts = [];
 if (obs.saw_playing) obsParts.push('观察到播放中');
 if (obs.last_state) obsParts.push('末次状态 ' + obs.last_state);
@@ -440,7 +457,7 @@ if (s && !s.jwxt.cookie_valid && !s.jwxt.locked) {
 }
 if (s && s.xiaoai.cookie_valid) {
     api('/api/xiaoai/devices').then(r => {
-        if (r.success && r.devices && r.devices.length) showDevices(r.devices);
+        if (r.success) showDevices(r.devices, 'init');
     }).catch(() => {});
 }
 })();

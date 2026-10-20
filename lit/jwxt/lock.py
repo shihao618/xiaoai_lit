@@ -25,8 +25,17 @@ def _save_lock(client):
             "lock_until": (client._lock_until or client._cooldown_until).isoformat() if (client._lock_until or client._cooldown_until) else None,
             "failed_attempts": client._failed_attempts,
         }
-        with open(_lock_file(), "w", encoding="utf-8") as f:
+        path = _lock_file()
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        if os.name != "nt":
+            try:
+                # 含 account 字段，与 credentials.json/jwxt.json 同权限策略（0600）
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+        os.replace(tmp, path)
     except Exception as e:
         logger.warning(f"保存锁定状态失败: {e}")
 

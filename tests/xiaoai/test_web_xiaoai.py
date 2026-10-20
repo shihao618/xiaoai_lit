@@ -1,6 +1,6 @@
-"""xiaoai 蓝图契约测试（N5，xiaoai_silent_play 组 5.5）：/broadcasts 四顶层键、
-/test 9 键分级、/select_device 条件 warning、/devices 5 键（Flask test_client
-仿 test_status_keys.py 范式，speaker 用 MagicMock，不真起 Flask）。"""
+"""xiaoai 蓝图契约测试：/broadcasts 三顶层键、/test 8 键分级、
+/select_device 条件 warning、/devices 5 键（Flask test_client，
+speaker 用 MagicMock，不真起 Flask）。"""
 from collections import deque
 from unittest.mock import MagicMock
 
@@ -14,9 +14,6 @@ from lit.xiaoai import diagnostics
 @pytest.fixture(autouse=True)
 def _isolate_diagnostics(monkeypatch):
     monkeypatch.setattr(diagnostics, "_records", deque(maxlen=10))
-    monkeypatch.setattr(diagnostics, "_self_check",
-                        {"status": "unknown", "checked_at": None, "message": None})
-    monkeypatch.setattr(diagnostics, "_self_check_done", False)
 
 
 def make_client(speaker):
@@ -27,31 +24,29 @@ def make_client(speaker):
 
 DETAIL = {
     "grade": 2, "grade_label": "指令已接受未确认播放",
-    "channel": "mibrain", "message": "指令已接受未确认播放",
+    "channel": "miot", "message": "指令已接受未确认播放",
     "warnings": ["w"],
     "device": {"device_id": "d1", "name": "小爱音箱",
                "hardware": "LX06", "is_speaker": True},
-    "synth": {"ok": True, "elapsed": 0.5, "duration": 10.0, "audio": "j.mp3"},
     "observation": {"saw_playing": False, "last_state": "paused",
                     "poll_count": 2, "volume": 50},
 }
 
 TEST_KEYS = {"success", "message", "grade", "grade_label", "channel",
-             "warnings", "device", "synth", "observation"}
+             "warnings", "device", "observation"}
 
 
 def test_broadcasts_empty_shape():
     tc = make_client(MagicMock())
     body = tc.get("/api/xiaoai/broadcasts").get_json()
-    assert set(body) == {"success", "count", "broadcasts", "audio_self_check"}
+    assert set(body) == {"success", "count", "broadcasts"}
     assert body["success"] is True
     assert body["count"] == 0
     assert body["broadcasts"] == []
-    assert body["audio_self_check"]["status"] == "unknown"
 
 
 def test_broadcasts_latest_first():
-    diagnostics.record_broadcast({"grade": 1, "channel": "primary",
+    diagnostics.record_broadcast({"grade": 1, "channel": "miot",
                                   "message": "first"})
     diagnostics.record_broadcast({"grade": 2, "channel": "mibrain",
                                   "message": "second"})
@@ -62,7 +57,7 @@ def test_broadcasts_latest_first():
     assert body["broadcasts"][1]["message"] == "first"
 
 
-def test_test_endpoint_nine_keys():
+def test_test_endpoint_keys():
     speaker = MagicMock()
     speaker.speak_with_detail.return_value = (True, "播报成功(已确认播放)", DETAIL)
     tc = make_client(speaker)
@@ -71,26 +66,17 @@ def test_test_endpoint_nine_keys():
     assert body["success"] is True
     assert body["grade"] == 2
     assert body["grade_label"] == "指令已接受未确认播放"
-    assert body["channel"] == "mibrain"
+    assert body["channel"] == "miot"
     assert body["warnings"] == ["w"]
-    assert body["synth"]["ok"] is True
 
 
-def test_test_endpoint_url_only_detail_keys():
+def test_test_endpoint_missing_text():
     speaker = MagicMock()
-    speaker.play_url_direct.return_value = (
-        True, "指令已接受未确认播放",
-        {"channel": "backup", "grade": 2,
-         "observation": {"saw_playing": False, "last_state": "paused",
-                         "poll_count": 3, "volume": 40}})
     tc = make_client(speaker)
-    body = tc.post("/api/xiaoai/test",
-                   json={"url": "http://x/a.mp3"}).get_json()
-    assert set(body) == TEST_KEYS
-    assert body["channel"] == "backup"
-    assert body["grade"] == 2
-    assert body["synth"] == {}
-    speaker.play_url_direct.assert_called_once_with("http://x/a.mp3")
+    body = tc.post("/api/xiaoai/test", json={}).get_json()
+    assert body["success"] is False
+    assert "text" in body["message"]
+    speaker.speak_with_detail.assert_not_called()
 
 
 def test_select_device_non_speaker_warning():
@@ -137,3 +123,21 @@ def test_devices_five_keys():
                           "is_speaker"}
     assert body["devices"][0]["is_speaker"] is True
     assert body["devices"][1]["is_speaker"] is False
+
+
+def test_stop_playback_route():
+    speaker = MagicMock()
+    speaker.stop_playback.return_value = (True, "已发送停止播放指令")
+    tc = make_client(speaker)
+    body = tc.post("/api/xiaoai/stop_playback").get_json()
+    assert body == {"success": True, "message": "已发送停止播放指令"}
+    speaker.stop_playback.assert_called_once_with()
+
+
+def test_stop_playback_route_failure():
+    speaker = MagicMock()
+    speaker.stop_playback.return_value = (False, "小爱音箱未登录，无法停止播放")
+    tc = make_client(speaker)
+    body = tc.post("/api/xiaoai/stop_playback").get_json()
+    assert body["success"] is False
+    assert "未登录" in body["message"]

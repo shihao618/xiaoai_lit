@@ -106,88 +106,19 @@ def test_tts_command_assembly():
     assert captured["headers"] == {"User-Agent": constants.MINA_USER_AGENT}
 
 
-def test_play_url_defaults_to_play_music():
-    captured = {}
-
-    def handler(call):
-        captured.update(call)
-        return {"code": 0, "data": {"code": 0}}, None
-
-    http = StubHTTP(handler=handler)
-    MiNAClient(http).play_url(make_cred(), "dev1", "https://example.com/a.mp3")
-    form = captured["form"]
-    assert form["method"] == "player_play_music"
-    assert form["path"] == "mediaplayer"
-    message = json.loads(form["message"])
-    assert message["startaudioid"] == "1582971365183456177"
-    music = json.loads(message["music"])
-    assert music["play_behavior"] == "REPLACE_ALL"
-    item = music["payload"]["audio_items"][0]
-    assert item["stream"]["url"] == "https://example.com/a.mp3"
 
 
-def test_play_url_play_music_for_l05b():
-    captured = {}
-
-    def handler(call):
-        captured.update(call)
-        return {"code": 0, "data": {"code": 0}}, None
-
-    http = StubHTTP(handler=handler)
-    MiNAClient(http).play_url(make_cred(), "dev1", "https://example.com/a.mp3",
-                              hardware="L05B")
-    assert captured["form"]["method"] == "player_play_music"
 
 
-def test_play_url_play_music_with_tail_two_items():
-    captured = {}
-
-    def handler(call):
-        captured.update(call)
-        return {"code": 0, "data": {"code": 0}}, None
-
-    http = StubHTTP(handler=handler)
-    MiNAClient(http).play_url(make_cred(), "dev1", "https://example.com/a.mp3",
-                              hardware="L05B",
-                              tail_url="https://example.com/silence.mp3")
-    form = captured["form"]
-    assert form["method"] == "player_play_music"
-    music = json.loads(json.loads(form["message"])["music"])
-    items = music["payload"]["audio_items"]
-    assert len(items) == 2
-    assert items[0]["stream"]["url"] == "https://example.com/a.mp3"
-    assert items[1]["stream"]["url"] == "https://example.com/silence.mp3"
 
 
-def test_play_url_legacy_for_other_hardware():
-    captured = {}
-
-    def handler(call):
-        captured.update(call)
-        return {"code": 0, "data": {"code": 0}}, None
-
-    http = StubHTTP(handler=handler)
-    MiNAClient(http).play_url(make_cred(), "dev1", "https://example.com/a.mp3",
-                              hardware="LX06")
-    form = captured["form"]
-    assert form["method"] == "player_play_url"
-    assert json.loads(form["message"]) == {
-        "media": "app_ios", "url": "https://example.com/a.mp3", "type": 2}
 
 
-def test_stop_playback_assembly():
-    captured = {}
 
-    def handler(call):
-        captured.update(call)
-        return {"code": 0, "data": {"code": 0}}, None
 
-    http = StubHTTP(handler=handler)
-    MiNAClient(http).stop_playback(make_cred(), "dev1")
-    form = captured["form"]
-    assert form["method"] == "player_play_operation"
-    assert form["path"] == "mediaplayer"
-    assert json.loads(form["message"]) == {"action": "pause", "media": "app_ios"}
+
+
+
 
 
 def test_inner_code_rejected():

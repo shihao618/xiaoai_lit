@@ -1,4 +1,4 @@
-"""小爱音箱蓝图：/api/xiaoai/* 8 条路由（契约冻结自 app.py）。"""
+"""小爱音箱蓝图：/api/xiaoai/* 9 条路由（云端原生播报 + 登录/设备管理）。"""
 import logging
 
 from flask import Blueprint, jsonify, request
@@ -66,14 +66,9 @@ def create_xiaoai_blueprint(xiaoai_speaker):
     def test():
         data = request.json or {}
         text = (data.get("text") or "").strip()
-        url = (data.get("url") or "").strip()
-        if not text and not url:
-            return jsonify({"success": False, "message": "text 与 url 至少一项非空"})
-        if not text and url:
-            ok, message, detail = xiaoai_speaker.play_url_direct(url)
-        else:
-            ok, message, detail = xiaoai_speaker.speak_with_detail(
-                text, backup_url=url or None)
+        if not text:
+            return jsonify({"success": False, "message": "text 不能为空"})
+        ok, message, detail = xiaoai_speaker.speak_with_detail(text)
         return jsonify({
             "success": ok,
             "message": message,
@@ -82,9 +77,13 @@ def create_xiaoai_blueprint(xiaoai_speaker):
             "channel": detail.get("channel"),
             "warnings": detail.get("warnings") or [],
             "device": detail.get("device") or {},
-            "synth": detail.get("synth") or {},
             "observation": detail.get("observation") or {},
         })
+
+    @bp.route("/stop_playback", methods=["POST"])
+    def stop_playback():
+        ok, message = xiaoai_speaker.stop_playback()
+        return jsonify({"success": ok, "message": message})
 
     @bp.route("/broadcasts")
     def broadcasts():
@@ -93,7 +92,6 @@ def create_xiaoai_blueprint(xiaoai_speaker):
             "success": True,
             "count": len(records),
             "broadcasts": records,
-            "audio_self_check": diagnostics.self_check_status(),
         })
 
     return bp

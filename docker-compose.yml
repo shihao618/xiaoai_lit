@@ -1,35 +1,67 @@
+# 洛阳理工学院课表提醒服务 —— Docker Compose 单容器部署
+# 应用内含进程内 APScheduler 与内存态（会话/缓存）：必须单实例、单 worker，
+# 不要 scale/多副本，否则会重复提醒、会话错乱（对应 Dockerfile CMD 的 --workers 1）。
+
+# 固定项目名 lit：复用既有命名卷 lit_lit-data / lit_lit-cache（含教务与扫码登录凭证），
+# 避免更换部署目录后 Compose 按目录名新建空卷导致"凭证丢失、需要重新扫码"。
+name: lit
+
 services:
   lit-course-reminder:
     build: .
     container_name: lit-course-reminder
     restart: unless-stopped
+    # PID 1 交给 tini：正确转发 SIGTERM、回收僵尸进程，配合 stop_grace_period 优雅退出
+    init: true
+    # 禁止进程通过 setuid/文件能力提权（应用以非 root appuser 运行）
+    security_opt:
+      - "no-new-privileges:true"
+    # 略大于 gunicorn --graceful-timeout 30s：先让 gunicorn 自行收尾，超时后 Docker 才 SIGKILL
+    stop_grace_period: 35s
     ports:
       - "10379:10379"
     environment:
-      - JWXT_BASE_URL=https://lljw.lit.edu.cn
-      - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}          # 引导/回退凭证（持久化优先，见 README）
+      # ---- 教务系统 ----
+      # 下列默认值均可被 .env / shell 环境变量覆盖（Compose 插值）
+      - JWXT_BASE_URL=${JWXT_BASE_URL:-https://lljw.lit.edu.cn}
+      # 引导/回退凭证（优先使用 data/ 中持久化的凭证，见 README）
+      - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}
       - JWXT_PASSWORD=${JWXT_PASSWORD:-}
-      # 小爱音箱拉流基地址 http://<宿主机局域网IP>:10379
-      # 留空=主通道禁用（L05B/L05C 型号播报无声），见 README
-      - XIAOAI_TTS_BASE_URL=${XIAOAI_TTS_BASE_URL:-}
-      - XIAOAI_TTS_BACKUP_URL=
-      - REMIND_BEFORE_MINUTES=30
-      - LOG_LEVEL=INFO
+      # ---- 小爱音箱播报 ----
+      # 播报只走云端 MIoT 原生文字播报（无需任何通道/地址配置）
+      # ---- 业务参数 ----
+      - REMIND_BEFORE_MINUTES=${REMIND_BEFORE_MINUTES:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # 可选：COOKIE_REFRESH_INTERVAL（秒，代码默认 1800 即每 30 分钟，见 lit/config/__init__.py）
+      # 确需调整时取消下一行注释；不加则使用代码默认值。
+      # - COOKIE_REFRESH_INTERVAL=1800
+      # ---- 持久化路径（必须与下方命名卷挂载点一致） ----
       - CACHE_DIR=/app/cache
       - DATA_DIR=/app/data
     volumes:
       - lit-data:/app/data
       - lit-cache:/app/cache
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:10379/api/status"]
+      # 与 Dockerfile HEALTHCHECK 保持同一命令（镜像内 python 标准库 urllib，运行阶段不再装 curl）
+      # start_period 60s：等待 onnxruntime/ddddocr 导入与 APScheduler 首轮初始化完成
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:10379/api/status', timeout=3).status == 200 else 1)"
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options:
+        # 单文件 10MB × 3 轮转，避免日志无限增长
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
+  # 课表/凭证/运行状态等持久化数据
   lit-data:
+  # 验证码、TTS 音频等缓存
   lit-cache:

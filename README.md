@@ -6,7 +6,35 @@
 
 - **教务 API 直取课表**：经教务系统 JSON 接口获取周次定位与当周课程（零 HTML 解析），调课等排课差异以教务端数据为准
 - **掉线自动重登**：首次登录记住账号密码（持久化到数据卷），Cookie 失效后预算内自动恢复，锁定期零请求不触发风控
-- **小爱音箱播报**：上午/下午课程提醒，最早课前 30 分钟（可配）TTS 播报课程名称与教室
+- **小爱音箱播报（云端原生）**：上午/下午课程提醒，最早课前 30 分钟（可配）；文字直接交小米 IoT 云由音箱原生朗读，无需本地 TTS、无需局域网 IP/拉流
+
+## 镜像与运行（Docker 标准）
+
+- **多阶段构建**：builder 阶段安装编译工具链并 `pip install` 依赖，runtime 阶段只保留运行库与依赖产物（镜像内无 gcc/g++、无 curl、无测试代码）
+- **非 root 运行**：容器内 `appuser` 用户运行；Compose 启用 `init: true`（tini 转发 SIGTERM、回收僵尸进程）与 `no-new-privileges`
+- **生产 WSGI**：容器入口为 gunicorn `--workers 1 --threads 8 --worker-class gthread`（应用内含进程内 APScheduler 与内存态会话/缓存，多 worker 会重复提醒、会话错乱，因此**禁止多副本/多 worker**）；本地开发仍用 `python main.py`
+- **依赖版本固定**：`requirements.txt` 锁定全部直接依赖版本（传递依赖由 pip 解析）；`gunicorn` 带 `sys_platform == "linux"` 标记，Windows 本地开发自动跳过
+- **健康检查**：镜像内置 `HEALTHCHECK` 与 Compose healthcheck 同一命令——镜像内 Python 标准库 `urllib` 探活 `/api/status`，不依赖 curl
+- **播报仅走云端**：**MIoT 原生文字播报**（`siid=5/aiid=3` play-text）——文字直接交小米 IoT 云由音箱原生朗读，**无本地 TTS 合成、无音频拉流、无静音垫底、无 pause 收尾**，播完设备自动停止；原生通道失败时自动回退 mibrain 原生 TTS（同为云端，部分型号会被服务端静默忽略，会附警示）
+- **无需局域网 IP**：播报不再依赖音箱访问宿主机地址，换 IP/DHCP 均不影响播报
+- **构建上下文最小化**：`.dockerignore` 排除 `.venv/`、`.git/`、`tests/`、`data/`、`cache/` 及全部开发工具产物，凭证与本地数据绝不进入镜像
+- **日志**：应用日志写 stdout，gunicorn access/error 日志写 stdout/stderr，统一由 `docker logs` 收集（compose 侧 `json-file` 10MB × 3 轮转），不使用容器内日志文件
+
+## 项目结构
+
+```
+main.py              本地开发入口（Flask dev server，仅本地调试用）
+wsgi.py              容器生产入口（gunicorn 调用）
+lit/config/          环境变量与路径配置
+lit/jwxt/            教务客户端：登录/学期代码/周课表/凭证/锁/状态
+lit/xiaoai/          小爱音箱：扫码登录/云端原生播报/诊断
+lit/web/             Flask 应用工厂 + 4 个蓝图 + templates/index.html
+lit/tasks.py         单调度器后台任务（课表刷新/提醒/Cookie 检查/缓存清理）
+tests/               单元测试（jwxt / xiaoai / 任务调度），fixtures/ 存放脱敏样本
+Dockerfile           多阶段镜像构建；docker-compose.yml 单容器编排
+docker-compose.fnos.yml  飞牛OS（fnOS）专用编排（命名卷显式固定、start_period 90s）
+requirements.txt     生产依赖（固定版本）；requirements-dev.txt 追加 pytest
+```
 
 ## Prerequisites
 
@@ -22,14 +50,52 @@ cd xiaoai_lit
 docker compose up -d --build
 ```
 
-浏览器打开 http://localhost:10379 ：
+浏览器打开 `http://localhost:10379`（仅本机）或 `http://<宿主机局域网IP>:10379` ：
 
 1. 教务配置区填写账号密码登录（或经环境变量预置引导凭证）
 2. 小爱配置区扫码登录音箱账号
 
 登录成功后凭证自动持久化到命名卷，容器重启/掉线均自动恢复，无需重复登录。
 
-首次部署建议：配置 `XIAOAI_TTS_BASE_URL`（宿主机局域网地址，见 Configuration）后在页面"播报测试"现场听音核对，确认音箱真实出声。
+> **播报无需局域网 IP**：原生播报由小米 IoT 云执行，不需要音箱访问宿主机地址；换 IP / DHCP 均不影响播报。
+
+可选：在仓库根目录创建 `.env`（已被 gitignore）写入 `JWXT_ACCOUNT`、`JWXT_PASSWORD` 等，Compose 会自动插值，无需修改 `docker-compose.yml`。
+
+首次部署建议：在页面"播报测试"现场听音核对，确认音箱真实出声（若用的是 `miot` 原生通道，无需配置任何 IP）。
+
+## 飞牛 OS（fnOS）部署
+
+仓库提供 fnOS 专用编排 [docker-compose.fnos.yml](docker-compose.fnos.yml)：命名卷显式固定为 `lit_lit-data` / `lit_lit-cache`，升级重建不丢数据；播报走云端，无需在 NAS 上额外放行任何局域网地址。
+
+### 方式 A：NAS 上直接构建（推荐）
+
+1. 将本仓库上传/解压到 NAS 存储目录，例如 `/vol1/1000/docker/lit-course-reminder`
+2. fnOS 应用中心 → Docker → Compose → 新建项目：
+   - 工作目录：上面的仓库目录
+   - Compose 文件：`docker-compose.fnos.yml`
+   - 构建并启动（首次构建需下载基础镜像与依赖，NAS 约 5~10 分钟）
+3. 浏览器打开 `http://<NAS 局域网 IP>:10379`，按页面登录教务、扫码登录小爱
+4. 若从旧部署迁移：先 `docker rm -f lit-course-reminder` 再启动本编排（命名卷同名，凭证数据保留）
+
+### 方式 B：电脑构建后导入（NAS 性能较弱时）
+
+```bash
+# 电脑（同架构）构建并导出镜像
+docker compose build
+docker save lit-course-reminder:latest -o lit-course-reminder.tar
+# 复制到 NAS 后导入，并用 fnOS 编排启动（跳过构建）
+docker load -i lit-course-reminder.tar
+docker compose -f docker-compose.fnos.yml up -d --no-build
+```
+
+### 端口 / 数据 / 升级
+
+- 端口：默认 `10379`，可在 `.env` 或 docker-compose.fnos.yml 同目录创建 `.env` 设置 `WEB_PORT=xxxx` 修改
+- 数据：命名卷 `lit_lit-data`（凭证/状态/MIoT 令牌）与 `lit_lit-cache`（课表缓存），位于 NAS Docker 数据目录
+- 备份：`docker cp lit-course-reminder:/app/data ./backup-data`；恢复步骤见下方 Volumes
+- 升级：替换代码目录后重新构建项目（方式 B 则重新 load 镜像）再启动即可
+- 播报不需要局域网 IP / 拉流，NAS 无需固定 IP，也不需要在路由器上做端口转发
+- fnOS 目前以 x86_64 机型为主；ARM 机型请自行验证依赖 wheel 可用性
 
 ## Configuration
 
@@ -39,10 +105,8 @@ docker compose up -d --build
 | `JWXT_ACCOUNT` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
 | `JWXT_PASSWORD` | （空） | **引导凭证**，登录成功后以卷内持久化凭证为准 |
 | `XNXQDM` | （空） | 学年学期代码（自动获取并缓存，通常无需配置） |
-| `XIAOAI_TTS_BASE_URL` | （空） | 小爱音箱拉流音频的基地址，形如 `http://<宿主机局域网IP>:10379`（**必配**）。留空 = 本地 TTS 主通道禁用，播报依赖原生 TTS 回退通道——L05B/L05C 等型号会被服务端静默忽略（页面提示成功但音箱无声）。注意：①不能配置为 localhost/127.0.0.1（音箱经局域网拉流，容器回环地址对音箱不可达）；②DHCP 动态 IP 环境下宿主机 IP 变更后需同步更新本配置并重启容器 |
-| `XIAOAI_TTS_BACKUP_URL` | （空） | 小爱 TTS 备用地址 |
 | `REMIND_BEFORE_MINUTES` | `30` | 提醒提前量（分钟） |
-| `COOKIE_REFRESH_INTERVAL` | `3600` | Cookie 检查间隔（秒） |
+| `COOKIE_REFRESH_INTERVAL` | `1800` | Cookie 检查间隔（秒，默认 30 分钟） |
 | `LOG_LEVEL` | `INFO` | 日志级别 |
 | `CACHE_DIR` | `/app/cache` | 缓存目录 |
 | `DATA_DIR` | `/app/data` | 数据目录 |
@@ -53,10 +117,12 @@ docker compose up -d --build
 
 | 卷 | 挂载点 | 内容 | 寿命 |
 |---|---|---|---|
-| `lit-data` | `/app/data` | 教务凭证/状态/锁定记录、小爱凭证 | `docker compose down -v` 清除 |
-| `lit-cache` | `/app/cache` | 课表缓存、TTS 音频缓存 | `docker compose down -v` 清除 |
+| `lit-data` | `/app/data` | 教务凭证/状态/锁定记录、小爱凭证、MIoT 令牌 | `docker compose down -v` 清除 |
+| `lit-cache` | `/app/cache` | 教务课表接口缓存 | `docker compose down -v` 清除 |
 
 日常重启（`docker compose restart` / `down` 不带 `-v`）数据保留。
+
+Compose 项目名已在 `docker-compose.yml` 固定为 `lit`（`name: lit`），命名卷恒为 `lit_lit-data` / `lit_lit-cache`——更换部署目录或重新 clone 后 `docker compose up` 仍复用同一份凭证数据，不会出现"重新扫码/重新登录"。本机专属配置（如 `JWXT_ACCOUNT`/`JWXT_PASSWORD`）可写入仓库根目录 `.env`（已 gitignore），Compose 自动插值。
 
 备份与恢复：
 
@@ -65,18 +131,20 @@ docker compose up -d --build
 docker cp lit-course-reminder:/app/data ./backup
 # 恢复
 docker cp ./backup/. lit-course-reminder:/app/data/
+# 属主修正：容器以非 root appuser 运行，docker cp 写入的文件可能属 root，需改回 appuser
+docker exec -u 0 lit-course-reminder chown -R appuser:appuser /app/data
 docker compose restart
 ```
 
 ## Healthcheck
 
-镜像内置 `HEALTHCHECK`（30s 间隔 / 5s 超时 / 40s 启动宽限 / 3 次重试），探活端点 `/api/status` 消费内存态状态——**零教务请求**：探活不消耗教务请求预算、不触发自动重登。
+镜像内置 `HEALTHCHECK`（30s 间隔 / 5s 超时 / 60s 启动宽限 / 3 次重试），探活端点 `/api/status` 消费内存态状态——**零教务请求**：探活不消耗教务请求预算、不触发自动重登。探活由镜像内 Python 标准库 `urllib` 完成（运行镜像不装 curl），Compose 的 healthcheck 与 Dockerfile 使用同一命令。
 
 ```bash
 docker inspect --format "{{.State.Health.Status}}" lit-course-reminder   # healthy
 ```
 
-若持续 `unhealthy`：`docker logs lit-course-reminder` 查看启动日志（常见为端口占用或启动刷新慢于 40s 宽限窗口）。
+若持续 `unhealthy`：`docker logs lit-course-reminder` 查看启动日志（常见为端口占用、依赖导入超时，或启动首轮刷新慢于 60s 宽限窗口）。冷启动导入 `onnxruntime`/`ddddocr` 较慢的低配机器可能出现短暂 unhealthy，只要日志正常、端口可访问即会自动转 healthy。
 
 ## Maintenance
 
@@ -104,18 +172,24 @@ docker compose up -d --build
 docker cp lit-course-reminder:/app/data/xiaoai/xiaoai_credentials.json ./
 # 新容器启动后恢复
 docker cp ./xiaoai_credentials.json lit-course-reminder:/app/data/xiaoai/
+# 属主修正（非 root 运行 + 凭证 0600，避免 appuser 读不到）
+docker exec -u 0 lit-course-reminder chown appuser:appuser /app/data/xiaoai/xiaoai_credentials.json
 ```
 
 进阶选项——将小爱凭证隔离到 external 卷（`down -v` 不波及）：
 
 ```yaml
 # docker-compose.override.yml 片段（不作默认配置）
+services:
+  lit-course-reminder:
+    volumes:
+      - xiaoai-data:/app/data/xiaoai
 volumes:
   xiaoai-data:
     external: true
 ```
 
-（先 `docker volume create xiaoai-data`，再把 `/app/data/xiaoai` 挂载到该卷。）
+（先 `docker volume create xiaoai-data`，再把 `/app/data/xiaoai` 挂载到该卷；`down -v` 不会删除 external 卷。）
 
 ### 凭证重置
 
@@ -128,16 +202,27 @@ volumes:
 
 ### 开发与测试
 
+本地开发直接运行 Flask dev server（**仅本地调试用**，生产容器走 gunicorn）：
+
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest tests/    # 当前基线：270 用例（xiaoai_silent_play 后 V1 实测固化）
+pip install -r requirements-dev.txt   # Windows 下 gunicorn 因 sys_platform 标记自动跳过
+python main.py                        # 本地启动 http://127.0.0.1:10379
+```
+
+测试：
+
+```bash
+python -m pytest tests/    # 当前基线：248 用例（仅云端播报通道）
 ```
 
 ## Security
 
+- **最小权限运行**：容器以非 root `appuser` 运行；Compose 启用 `init: true`（tini）与 `no-new-privileges`；镜像为多阶段构建，不含 gcc/g++ 等编译工具链，运行阶段不再安装 curl 等非必需包
+- **构建上下文隔离**：`.dockerignore` 排除 `.venv/`、`.git/`、`tests/`、`data/`、`cache/`、`.env*` 及开发工具产物，凭证与本地数据绝不进入镜像层
+- **依赖固定**：`requirements.txt` 锁定全部直接依赖版本，降低供应链漂移风险（传递依赖未锁定）
 - **密码明文落盘**：`data/jwxt/credentials.json` 以明文保存教务账号密码（文件权限 `600`）。单机自部署场景下，可逆加密因密钥同机存放不构成实质防线，故采用明文 + 权限隔离方案；请自行确保宿主机与 Docker 环境访问安全
 - **卷访问控制**：命名卷由 Docker 直接管理（位于 Docker Desktop 虚拟机文件系统内），宿主普通用户无直接路径访问
-- **权限**：凭证文件 `0600`（仅容器内运行用户可读）
+- **权限**：凭证与令牌文件 `0600`（仅容器内运行用户可读，含 `jwxt/credentials.json`、`jwxt/jwxt.json`、`xiaoai/xiaoai_credentials.json`、`xiaoai/miot_token.json`）
 
 ## Troubleshooting
 
@@ -148,4 +233,10 @@ python -m pytest tests/    # 当前基线：270 用例（xiaoai_silent_play 后 
 | 教务接口异常 | 自动缓存降级：当日缓存有效时按缓存提醒（宁可多提醒不可停提醒）；跨周缓存自动弃用，不会播报过期课表 |
 | Windows 宿主目录直接挂载（bind mount）失败 | 本项目仅支持命名卷部署（non-root 运行 + Windows 权限语义限制），不提供以 root 运行的降级方案 |
 | 周次徽章显示"学期外" | 寒暑假正常显示（教务接口无当日教学周数据）；开学后自动恢复为"第 N 周" |
-| 播报提示成功但音箱无声 | ①核对 `XIAOAI_TTS_BASE_URL` 已配置为宿主机局域网地址（最常见）②页面"播报诊断"查看最近播报（通道/分级/警示/自检状态）③设备列表核对 hardware 型号与"音箱"标注④现场听音核对（部分型号播放状态固件不可靠，系统无法自动确认出声） |
+| 播报提示成功但音箱无声 | ①**先检查音箱是否被静音**（音箱静音时接口仍返回成功；米家 App 或语音"取消静音"）②查看日志是否有 `MIoT 服务令牌获取成功`；令牌失效会自动重建，失败则重新扫码登录小爱账号 ③页面"播报诊断"看通道/分级/警示 ④现场听音核对 |
+| 需要立刻停止播报 | `curl -X POST http://127.0.0.1:10379/api/xiaoai/stop_playback`（局域网内换成宿主机 IP 同理） |
+| 页面提示"指令已接受未确认播放" | 这是**正常分级语义**：云端已受理并下发设备，但应用没观察到设备处于播放状态（MIoT 播放状态属性读取不稳定）。①先确认音箱**音量/静音/勿扰**状态（米家 App）②以现场听音为准 |
+| 播报无声但日志显示播报成功 | 检查音箱音量是否为 0、是否开启勿扰/夜间模式（米家 App），再点页面"播报测试"确认 |
+| 容器启动即退出/反复重启 | `docker logs lit-course-reminder` 查看：常见为 `requirements.txt` 缺 gunicorn（容器入口依赖它）、依赖安装失败或数据卷权限异常；数据目录必须用命名卷，勿改 bind mount |
+| 页面/接口超时或 502 | 先 `docker compose config` 校验配置，再确认端口映射 10379 与宿主机防火墙；日志出现 `WORKER TIMEOUT` 可调大 Dockerfile 中 `--timeout`（gthread 下该值是 worker 心跳超时，不是单请求超时） |
+| 构建慢/拉取失败 | Python 依赖走清华 PyPI 镜像；基础镜像默认 DaoCloud 国内加速，可 `docker compose build --build-arg BASE_IMAGE=python:3.11-slim` 或改 Dockerfile ARG 切换源 |

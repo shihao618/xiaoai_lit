@@ -18,8 +18,8 @@ from .httpclient import XiaomiHTTPClient
 
 logger = logging.getLogger(__name__)
 
-# 这些型号的 player_play_url / mibrain text_to_speech 被服务端静默忽略，
-# 必须走 player_play_music（与 miservice _USE_PLAY_MUSIC_API 保持一致）
+# 这些型号的 mibrain text_to_speech 会被服务端静默忽略（返回 code=0 但不播报）；
+# 云端原生播报改走 MIoT（见 miot.py），本模块仅保留登录/设备/TTS 回退接口。
 USE_PLAY_MUSIC_HARDWARE = frozenset({
     "LX04", "LX05", "L05B", "L05C", "L06", "L06A",
     "X08A", "X10A", "X08C", "X08E", "X8F", "X4B",
@@ -41,6 +41,7 @@ class SpeakerDevice:
     name: str
     hardware: str
     address: str
+    miot_did: str = ""
 
     def to_api_dict(self) -> dict:
         return {
@@ -137,6 +138,7 @@ class MiNAClient:
                 name=str(item.get("name", "") or ""),
                 hardware=str(item.get("hardware", "") or ""),
                 address=str(item.get("address", "") or ""),
+                miot_did=str(item.get("miotDID", "") or ""),
             ))
         return devices
 
@@ -147,82 +149,6 @@ class MiNAClient:
             "message": json.dumps({"text": text}, ensure_ascii=False),
             "method": "text_to_speech",
             "path": "mibrain",
-        })
-
-    def play_url(self, cred, device_id: str, url: str, hardware: str = None,
-                 tail_url: str = None) -> None:
-        """URL 播放：L05B/L05C 等型号必须走 player_play_music（player_play_url
-        对这些型号被服务端静默忽略，返回 code=0 假成功），其余走 player_play_url。
-        tail_url 为垫底音频（静音），使列表循环落在静音段而非重播正文。
-        """
-        message = json.dumps(
-            {"media": "app_ios", "url": url, "type": 2}, ensure_ascii=False
-        )
-        method = "player_play_url"
-        if hardware is None or hardware in USE_PLAY_MUSIC_HARDWARE:
-            method = "player_play_music"
-            message = self._music_payload(url, tail_url)
-        self._mina_request(cred, "/remote/ubus", form={
-            "deviceId": device_id,
-            "message": message,
-            "method": method,
-            "path": "mediaplayer",
-        })
-
-    @staticmethod
-    def _music_payload(url: str, tail_url: str = None) -> str:
-        """player_play_music 的 message：startaudioid + music（嵌套 JSON 字符串，
-        移植 miservice play_by_music_url 的双重编码结构）。"""
-        audio_id = "1582971365183456177"
-
-        def item(stream_url):
-            return {
-                "item_id": {
-                    "audio_id": audio_id,
-                    "cp": {
-                        "album_id": "-1",
-                        "episode_index": 0,
-                        "id": "355454500",
-                        "name": "xiaowei",
-                    },
-                },
-                "stream": {"url": stream_url},
-            }
-
-        items = [item(url)]
-        if tail_url:
-            items.append(item(tail_url))
-        music = {
-            "payload": {
-                "audio_type": "",
-                "audio_items": items,
-                "list_params": {
-                    "listId": "-1",
-                    "loadmore_offset": 0,
-                    "origin": "xiaowei",
-                    "type": "MUSIC",
-                },
-            },
-            "play_behavior": "REPLACE_ALL",
-        }
-        return json.dumps(
-            {
-                "startaudioid": audio_id,
-                "music": json.dumps(music, ensure_ascii=False),
-            },
-            ensure_ascii=False,
-        )
-
-    def stop_playback(self, cred, device_id: str) -> None:
-        """停止当前播放（play_music 单条列表在 L05B/L05C 上会无限循环，
-        且 action=stop 被固件静默忽略，实测仅 action=pause 能真正终止）。"""
-        self._mina_request(cred, "/remote/ubus", form={
-            "deviceId": device_id,
-            "message": json.dumps(
-                {"action": "pause", "media": "app_ios"}, ensure_ascii=False
-            ),
-            "method": "player_play_operation",
-            "path": "mediaplayer",
         })
 
     def get_play_status(self, cred, device_id: str) -> PlayerStatus:

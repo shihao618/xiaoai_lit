@@ -100,6 +100,11 @@ class CredentialStore:
         tmp_path = self.path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        if os.name != "nt":
+            try:
+                os.chmod(tmp_path, 0o600)
+            except OSError:
+                pass
         os.replace(tmp_path, self.path)
 
     def _read_json(self, filename: str) -> Optional[dict]:

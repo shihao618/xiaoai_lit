@@ -1,5 +1,5 @@
 """周课表 API 契约测试（N2）：fetch_week_courses 请求最小形态（H6）/ code<0 /
-空列表合法（F5）/ parse_courses 键提取 + 45 键样本回归 / 五元组缓存读写与防御校验。"""
+空列表合法（F5）/ parse_courses 键提取 + 44 键样本回归 / 五元组缓存读写与防御校验。"""
 import json
 import os
 from datetime import date
@@ -12,8 +12,7 @@ from lit.jwxt.api.week_table import (
     parse_courses, save_cache,
 )
 
-_V0_SUMMARY = (Path(__file__).resolve().parents[2] / ".codeartsdoer" / "specs"
-               / "jwxt_pure_api" / "v0_summary_verdicts.json")
+_V0_SAMPLE = Path(__file__).resolve().parent / "fixtures" / "v0_raw_week_zc7_sample.json"
 
 
 class StubResponse:
@@ -36,12 +35,10 @@ class FakeSession:
 
 
 def _v0_sample() -> dict:
-    """v0_summary_verdicts.json sample_first 程序化转 fixture（design 2.6.4）：
-    真实 45 键结构回归防字段名笔误；teaxms 脱敏"教师A"（V0 报告惯例）。"""
-    with open(_V0_SUMMARY, "r", encoding="utf-8") as f:
-        sample = json.load(f)["v0_raw_week_zc7.json"]["sample_first"]
-    sample["teaxms"] = "教师A"
-    return sample
+    """真实接口 44 键样本回归（fixture 化，随 tests/ 入库）：防字段名笔误；
+    teaxms/pkr/teadms/pkrdms 已脱敏（V0 报告惯例）。"""
+    with open(_V0_SAMPLE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 COURSES = [
@@ -92,8 +89,8 @@ def test_parse_courses_date_start_time_extraction():
     assert c["teacher"] == "教师B"
 
 
-def test_parse_courses_v0_45key_sample():
-    """V0 真实样本解析（v0_raw_week_zc7.json sample_first，教师脱敏）。
+def test_parse_courses_v0_44key_sample():
+    """V0 真实样本解析（v0_raw_week_zc7.json sample_first，已脱敏为 44 键 fixture）。
     实测 44 键（spec 引用 V0 报告"45 键"口径，JSON 实测 44——Q9 如实固化）。"""
     sample = _v0_sample()
     assert len(sample) == 44

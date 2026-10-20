@@ -1,4 +1,0 @@
-import os
-
-XIAOAI_TTS_BACKUP_URL = os.getenv("XIAOAI_TTS_BACKUP_URL", "")
-XIAOAI_TTS_BASE_URL = os.getenv("XIAOAI_TTS_BASE_URL", "")

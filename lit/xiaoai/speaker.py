@@ -1,4 +1,4 @@
-"""XiaoAISpeaker 门面：凭证四态状态机、存量接口兼容、播报编排（TTS→URL 回退）。"""
+"""XiaoAISpeaker 门面：凭证四态状态机、存量接口兼容、云端原生播报编排。"""
 
 import logging
 import threading
@@ -6,7 +6,6 @@ import time
 from datetime import datetime
 from typing import List, Optional
 
-from lit import config
 
 from . import constants
 from .account import XiaomiAccountClient
@@ -21,6 +20,7 @@ from .exceptions import (
 from .httpclient import XiaomiHTTPClient
 from .mina import (MiNAClient, SpeakerDevice, USE_PLAY_MUSIC_HARDWARE,
                    is_speaker_hardware)
+from .miot import MiOTClient
 from .qrlogin import QRLoginManager, render_qr_png_data_uri
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,13 @@ _GRADE_LABELS = {1: "已确认播放", 2: "指令已接受未确认播放", 3: "
 class XiaoAISpeaker:
     """对 app.py / scheduler.py / cookie_manager.py 保持存量契约的门面。"""
 
-    def __init__(self, *, http=None, account=None, mina=None, store=None, qr=None):
+    def __init__(self, *, http=None, account=None, mina=None, store=None, qr=None,
+                 miot=None):
         self._lock = threading.RLock()
         self._store = store or CredentialStore()
         self._account = account or XiaomiAccountClient(http or XiaomiHTTPClient())
         self._mina = mina or MiNAClient(http or XiaomiHTTPClient())
+        self._miot = miot or MiOTClient()
         self._qr = qr or QRLoginManager(self._account, self._on_qr_confirmed)
         self._cred: Optional[Credentials] = None
         self._state = constants.STATE_NO_CREDENTIAL
@@ -240,53 +242,46 @@ class XiaoAISpeaker:
                 "state": self._state,
             }
 
-    # ---------- 播报编排 ----------
+    # ---------- 播报编排（仅云端通道：MIoT 原生播报 / mibrain 回退） ----------
 
-    def alarm_and_speak(self, text, backup_url=None) -> bool:
-        return self.speak_with_result(text, backup_url)[0]
+    def alarm_and_speak(self, text) -> bool:
+        return self.speak_with_result(text)[0]
 
-    def speak_with_result(self, text, backup_url=None):
+    def speak_with_result(self, text):
         """存量二维契约（签名/布尔语义/调用方零变化）。"""
-        ok, msg, _ = self.speak_with_detail(text, backup_url)
+        ok, msg, _ = self.speak_with_detail(text)
         return ok, msg
 
-    def speak_with_detail(self, text, backup_url=None):
-        """分级播报唯一实现路径：返回 (ok, msg, detail)。
+    def speak_with_detail(self, text):
+        """云端播报唯一实现路径：返回 (ok, msg, detail)。
 
-        ok ⟺ grade ∈ {1, 2}（Q5 三级分级：1=已确认播放，2=指令已接受
-        未确认播放，3=播报失败）；detail 为诊断全要素（grade/channel/
-        message/warnings/device/synth/observation），每次播报（含失败与
-        异常）落档 diagnostics 并输出结构化分级日志（spec 4.4 条 1）。
+        主通道 = MIoT 原生文字播报（文字直出、播完自动停止）；
+        失败回退 mibrain 原生 TTS（同为云端通道，对 L05B/L05C 可能被服务端
+        静默忽略，会附型号警示）。ok ⟺ grade ∈ {1, 2}。
         """
         from . import diagnostics
-        from . import tts as tts_module
 
-        warnings = list(tts_module.base_url_warnings())
-        for warning in warnings:
-            logger.warning("%s", warning)
+        warnings = []
         try:
             with self._lock:
                 if (self._state != constants.STATE_LOGGED_IN
                         or self._cred is None or not self._cred.is_usable()):
                     logger.warning("小爱音箱未登录，跳过播报")
                     return False, "小爱音箱未登录", self._detail(
-                        3, "none", "小爱音箱未登录", warnings, None, None, None)
+                        3, "none", "小爱音箱未登录", warnings, None, None)
                 cred = self._cred
                 device_id = self._resolve_device_locked()
             if not device_id:
                 logger.warning("未找到可用的小爱音箱设备，跳过播报")
                 return False, "未找到可用的音箱设备", self._detail(
-                    3, "none", "未找到可用的音箱设备", warnings, None, None, None)
-            backup = backup_url or (getattr(config, "XIAOAI_TTS_BACKUP_URL",
-                                            "") or "")
+                    3, "none", "未找到可用的音箱设备", warnings, None, None)
             hardware = self._hardware_of(device_id)
             name = self._device_name_of(device_id) or ""
             device_is_speaker = is_speaker_hardware(hardware or "", name)
             if not device_is_speaker:
                 warnings.append("目标设备疑似非音箱（hardware=%s），播报可能无声"
                                 % (hardware if hardware is not None else "未知"))
-            ok, msg, info = self._speak_segment(cred, device_id, PROMPT_TEXT,
-                                                text, backup)
+            ok, msg, info = self._speak_cloud(cred, device_id, PROMPT_TEXT, text)
             info = dict(info or {})
             channel = str(info.get("channel") or "none")
             if channel == "mibrain" and hardware in USE_PLAY_MUSIC_HARDWARE:
@@ -303,123 +298,118 @@ class XiaoAISpeaker:
                 ok = False
             detail = self._detail(grade, channel, msg, warnings,
                                   (device_id, name, hardware, device_is_speaker),
-                                  info.get("synth"), info.get("observation"))
+                                  info.get("observation"))
             diagnostics.record_broadcast(detail)
             self._log_broadcast(grade, channel, text, detail)
             return ok, msg, detail
         except Exception as e:
             logger.error("小爱播报异常: %s", e)
             detail = self._detail(3, "none", f"播报异常: {e}", warnings,
-                                  None, None, None)
+                                  None, None)
             diagnostics.record_broadcast(detail)
             return False, f"播报异常: {e}", detail
 
-    def play_url_direct(self, url):
-        try:
-            with self._lock:
-                if (self._state != constants.STATE_LOGGED_IN
-                        or self._cred is None or not self._cred.is_usable()):
-                    return False, "小爱音箱未登录", {
-                        "channel": "backup", "grade": 3}
-                cred = self._cred
-                device_id = self._resolve_device_locked()
-            if not device_id:
-                return False, "未找到可用的音箱设备", {
-                    "channel": "backup", "grade": 3}
-            self._mina.play_url(cred, device_id, url,
-                                self._hardware_of(device_id),
-                                tail_url=self._tail_url_safe())
-            # 备份音频时长未知：等待上限内轮询，到时 pause 防 L05B 列表循环
-            observation = self._wait_playback(cred, device_id,
-                                              constants.PLAYBACK_WAIT_TIMEOUT)
-            grade = self._grade_from_observation(True, observation)
-            msg = "播放成功(已确认播放)" if grade == 1 else "指令已接受未确认播放"
-            return True, msg, {
-                "channel": "backup", "observation": observation, "grade": grade}
-        except RequestTimeoutError:
-            logger.warning("备份通道播放超时，结果未知（不重发）")
-            return False, "播报结果未知，请人工确认音箱状态", {
-                "channel": "backup", "grade": 3}
-        except Exception as e:
-            self._apply_error(e)
-            return False, f"播放失败: {e}", {"channel": "backup", "grade": 3}
+    def _miot_did_of(self, device_id):
+        """MiNA deviceID → MIoT did（device_list 的 miotDID 字段）。"""
+        for d in self._devices:
+            if d.device_id == device_id:
+                return d.miot_did or ""
+        return ""
 
-    def _speak_segment(self, cred, device_id, prompt, text, backup_url):
-        # 主通道：本地 TTS 合成单文件（提示语 + 4 秒静音 + 正文）+
-        # player_play_music 一次播放（L05B/L05C 等型号的 mibrain
-        # text_to_speech 会被服务端静默忽略，必须走音频 URL）
-        synth = None
+    def _miot_observe_playing(self, cred, device_id, timeout=1.2,
+                              interval=0.25):
+        """原生播报后的播放状态观察，返回真实观察要素。
+
+        - saw_playing: 是否读到 MIoT 播放状态=1（Playing）
+        - last_state: 末次可读状态（"playing"/其它，读不到为 None）
+        - poll_count: 真实轮询次数（命中即停）
+        - note: 状态读取失败时的说明（读取失败不计入播放判断）
+        """
+        observation = {"saw_playing": False, "last_state": None,
+                       "poll_count": 0, "volume": None}
+        did = self._miot_did_of(device_id)
+        if not did:
+            return observation
+        deadline = time.monotonic() + timeout
+        errors = 0
+        while True:
+            observation["poll_count"] += 1
+            try:
+                state = self._miot.playing_state(cred, did)
+                if state == constants.MIOT_PLAYING:
+                    observation["saw_playing"] = True
+                    observation["last_state"] = "playing"
+                    return observation
+                if state is not None:
+                    observation["last_state"] = str(state)
+            except Exception:
+                errors += 1
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if errors:
+                    observation["note"] = f"播放状态读取失败 {errors} 次"
+                return observation
+            time.sleep(min(interval, remaining))
+
+    def _speak_native(self, cred, device_id, prompt, text):
+        """MIoT 原生文字播报：提示语 → 4 秒 → 正文（两段 play-text）。
+
+        文字直出由小米 IoT 云执行，无需本地合成/音频拉流/静音垫底；
+        播报结束设备自动停止，无需 pause 收尾。
+        """
+        did = self._miot_did_of(device_id)
+        if not did:
+            raise XiaoAIError("设备缺少 miotDID，无法使用原生播报")
+        started = time.monotonic()
+        self._miot.play_text(cred, did, prompt)
+        observation = self._miot_observe_playing(cred, device_id, timeout=1.2)
+        remaining = max(0.0, 4.0 - (time.monotonic() - started))
+        if remaining:
+            time.sleep(remaining)
+        self._miot.play_text(cred, did, text)
+        grade = 1 if observation["saw_playing"] else 2
+        return True, "ok", {
+            "channel": "miot", "grade": grade,
+            "observation": observation,
+        }
+
+    def _speak_cloud(self, cred, device_id, prompt, text):
+        """云端主通道 MIoT 原生播报；失败回退 mibrain 原生 TTS（均为云端）。"""
         fallback_reason = None
-        if getattr(config, "XIAOAI_TTS_BASE_URL", ""):
-            from . import tts as tts_module
-            audio, duration, synth_elapsed = tts_module.synthesize_announcement(
-                prompt, text)
-            synth = {"ok": bool(audio), "elapsed": round(synth_elapsed, 2),
-                     "duration": round(duration, 1), "audio": audio}
-            if audio:
-                url = tts_module.audio_url(audio)
-                try:
-                    tail = tts_module.silence_url()
-                except Exception:
-                    tail = None
-                try:
-                    self._mina.play_url(
-                        cred, device_id, url, self._hardware_of(device_id),
-                        tail_url=tail)
-                    observation = self._wait_playback(cred, device_id, duration)
-                    grade = self._grade_from_observation(True, observation)
-                    return True, "ok", {
-                        "channel": "primary", "observation": observation,
-                        "synth": synth, "grade": grade}
-                except RequestTimeoutError:
-                    logger.warning("播报请求超时，结果未知（不重发不回退）: %s",
-                                   str(text)[:50])
-                    return False, "播报结果未知，请人工确认音箱状态", {
-                        "channel": "primary", "synth": synth, "grade": 3}
-                except CredentialRejectedError:
-                    with self._lock:
-                        self._enter_rejected_locked()
-                    logger.warning("凭证已失效，终止播报")
-                    return False, "登录凭证已失效，请重新登录", {
-                        "channel": "primary", "synth": synth, "grade": 3}
-                except RateLimitedError:
-                    logger.warning("限频，放弃本次播报")
-                    return False, "操作过于频繁，播报放弃", {
-                        "channel": "primary", "synth": synth, "grade": 3}
-                except CommandRejectedError as e:
-                    if backup_url:
-                        logger.warning("播放被明确拒绝（%s），回退备份音频 URL", e)
-                        ok, msg, info = self._play_backup(cred, device_id,
-                                                          backup_url)
-                        return ok, msg, self._merged_fallback_info(
-                            info, synth, None)
-                    logger.warning("播放被明确拒绝且无备份通道: %s", e)
-                    return False, f"音箱未接受指令: {e}", {
-                        "channel": "primary", "synth": synth, "grade": 3}
-                except Exception as e:
-                    logger.warning("本地音频播报通道失败，尝试原生TTS: %s", e)
-                    fallback_reason = f"本地音频播报通道失败（{e}），已回退原生TTS"
-            else:
-                logger.warning("本地TTS合成失败，尝试原生TTS")
-                fallback_reason = "本地TTS合成失败，已回退原生TTS"
-        # 回退通道：mibrain text_to_speech 两段（提示语 → 4 秒 → 正文）
-        ok, msg, info = self._mibrain_speak(cred, device_id, prompt, backup_url)
+        try:
+            return self._speak_native(cred, device_id, prompt, text)
+        except RequestTimeoutError:
+            logger.warning("云端播报请求超时，结果未知（不重发不回退）")
+            return False, "播报结果未知，请人工确认音箱状态", {
+                "channel": "miot", "grade": 3}
+        except CredentialRejectedError:
+            with self._lock:
+                self._enter_rejected_locked()
+            logger.warning("MIoT 凭证已失效，终止播报")
+            return False, "登录凭证已失效，请重新登录", {
+                "channel": "miot", "grade": 3}
+        except RateLimitedError:
+            logger.warning("MIoT 限频，放弃本次播报")
+            return False, "操作过于频繁，播报放弃", {
+                "channel": "miot", "grade": 3}
+        except Exception as e:
+            logger.warning("MIoT 原生播报失败，回退 mibrain 原生 TTS: %s", e)
+            fallback_reason = f"MIoT 原生播报失败（{e}），已回退 mibrain 原生 TTS"
+        # 回退通道：mibrain 原生 TTS 两段（提示语 → 4 秒 → 正文）
+        ok, msg, info = self._mibrain_speak(cred, device_id, prompt)
         if not ok:
-            return False, msg, self._merged_fallback_info(
-                info, synth, fallback_reason)
+            return False, msg, self._merged_fallback_info(info, fallback_reason)
         time.sleep(4)
-        ok, msg, info = self._mibrain_speak(cred, device_id, text, backup_url)
+        ok, msg, info = self._mibrain_speak(cred, device_id, text)
         if ok:
-            # 正文段完成后单次弱观察（MiNA 请求数 2 → 3 次，预算合规）
             observation = self._weak_observation(cred, device_id)
             info = dict(info or {})
             info["observation"] = observation
             info["grade"] = self._grade_from_observation(True, observation)
-        return ok, msg, self._merged_fallback_info(
-            info, synth, fallback_reason)
+        return ok, msg, self._merged_fallback_info(info, fallback_reason)
 
-    def _mibrain_speak(self, cred, device_id, text, backup_url):
-        """mibrain TTS 单段播报（对 L05B/L05C 无效，其他型号可用）。"""
+    def _mibrain_speak(self, cred, device_id, text):
+        """mibrain 原生 TTS 单段（云端；对 L05B/L05C 可能被服务端静默忽略）。"""
         try:
             self._mina.text_to_speech(cred, device_id, text)
             return True, "ok", {"channel": "mibrain"}
@@ -439,67 +429,33 @@ class XiaoAISpeaker:
             return False, "操作过于频繁，播报放弃", {
                 "channel": "mibrain", "grade": 3}
         except CommandRejectedError as e:
-            if backup_url:
-                logger.warning("TTS 被明确拒绝（%s），回退备份音频 URL", e)
-                return self._play_backup(cred, device_id, backup_url)
-            logger.warning("TTS 被明确拒绝且无备份通道: %s", e)
+            logger.warning("mibrain 原生 TTS 被明确拒绝: %s", e)
             return False, f"音箱未接受指令: {e}", {
                 "channel": "mibrain", "grade": 3}
         except Exception as e:
             logger.error("播报失败: %s", e)
             return False, f"播报失败: {e}", {"channel": "mibrain", "grade": 3}
 
-    def _wait_playback(self, cred, device_id, duration):
-        """等待播放完成并暂停，防止 REPLACE_ALL 列表循环重播。
-
-        L05B/L05C 的 player_get_play_status 恒返回 paused（状态不可靠）、
-        action=stop 被固件忽略，故以音频时长为主钟：到时无条件发 pause
-        （play_music 列表第二项为 30 秒静音，pause 落在静音段，正文恰好
-        播放一遍）；期间若可靠观察到 playing → 非 playing 则提前 pause。
-        """
-        deadline = time.monotonic() + min(
-            max(duration, 2.0) + constants.PLAYBACK_START_GRACE,
-            constants.PLAYBACK_WAIT_TIMEOUT)
-        saw_playing = False
-        last_state = None
-        poll_count = 0
-        volume = None
-        while time.monotonic() < deadline:
-            time.sleep(constants.PLAYBACK_POLL_INTERVAL)
-            try:
-                st = self._mina.get_play_status(cred, device_id)
-            except Exception:
-                continue
-            poll_count += 1
-            if st.state:
-                last_state = st.state
-            if st.volume is not None:
-                volume = st.volume
-            if st.state == "playing":
-                saw_playing = True
-            elif saw_playing:
-                break
+    def stop_playback(self):
+        """立即停止当前云端播报：返回 (ok, message)。"""
+        with self._lock:
+            if (self._state != constants.STATE_LOGGED_IN
+                    or self._cred is None or not self._cred.is_usable()):
+                return False, "小爱音箱未登录，无法停止播放"
+            cred = self._cred
+            device_id = self._resolve_device_locked()
+        if not device_id:
+            return False, "未找到可用的小爱音箱设备，无法停止播放"
+        did = self._miot_did_of(device_id)
+        if not did:
+            return False, "设备缺少 MIoT 标识，无法停止播放"
         try:
-            self._mina.stop_playback(cred, device_id)
-        except Exception:
-            pass
-        return {
-            "saw_playing": saw_playing,
-            "last_state": last_state,
-            "poll_count": poll_count,
-            "volume": volume,
-        }
-
-    @staticmethod
-    def _tail_url_safe():
-        """静音垫底 URL（可选）：L05B/L05C 列表循环落静音段；未启用本地 TTS 返回 None。"""
-        if not getattr(config, "XIAOAI_TTS_BASE_URL", ""):
-            return None
-        try:
-            from . import tts as tts_module
-            return tts_module.silence_url()
-        except Exception:
-            return None
+            self._miot.stop(cred, did)
+            logger.info("已发送停止播放指令（MIoT）")
+            return True, "已发送停止播放指令"
+        except Exception as e:
+            logger.warning("停止播放失败: %s", e)
+            return False, f"停止播放失败: {e}"
 
     def _hardware_of(self, device_id):
         for d in self._devices:
@@ -512,30 +468,6 @@ class XiaoAISpeaker:
             if d.device_id == device_id:
                 return d.name
         return None
-
-    def _play_backup(self, cred, device_id, url):
-        try:
-            self._mina.play_url(cred, device_id, url,
-                                self._hardware_of(device_id),
-                                tail_url=self._tail_url_safe())
-            observation = self._wait_playback(cred, device_id,
-                                              constants.PLAYBACK_WAIT_TIMEOUT)
-            grade = self._grade_from_observation(True, observation)
-            return True, "ok", {
-                "channel": "backup", "observation": observation, "grade": grade}
-        except RequestTimeoutError:
-            logger.warning("备份通道播放超时，结果未知（不重发）")
-            return False, "播报结果未知，请人工确认音箱状态", {
-                "channel": "backup", "grade": 3}
-        except CredentialRejectedError:
-            with self._lock:
-                self._enter_rejected_locked()
-            return False, "登录凭证已失效，请重新登录", {
-                "channel": "backup", "grade": 3}
-        except Exception as e:
-            logger.warning("备份通道播放失败: %s", e)
-            return False, f"备份通道播放失败: {e}", {
-                "channel": "backup", "grade": 3}
 
     def _resolve_device_locked(self):
         """默认设备解析：已选设备 → 第一台音箱 → 第一台设备 → 失败（须持锁调用）。"""
@@ -562,7 +494,7 @@ class XiaoAISpeaker:
         return 2
 
     def _weak_observation(self, cred, device_id):
-        """mibrain 正文段完成后的单次弱观察（异常全吞，不参与控制流）。"""
+        """mibrain 回退播报后的单次弱观察（异常全吞，不参与控制流）。"""
         try:
             st = self._mina.get_play_status(cred, device_id)
         except Exception:
@@ -573,18 +505,16 @@ class XiaoAISpeaker:
                 "volume": st.volume}
 
     @staticmethod
-    def _merged_fallback_info(info, synth, fallback_reason):
-        """回退路径合并主通道诊断要素（synth 与降级事实/原因）。"""
+    def _merged_fallback_info(info, fallback_reason):
+        """回退路径合并降级事实/原因。"""
         info = dict(info or {})
-        if synth is not None:
-            info["synth"] = synth
         if fallback_reason:
             info["warnings"] = list(info.get("warnings") or []) + [fallback_reason]
         return info
 
     @staticmethod
-    def _detail(grade, channel, message, warnings, device, synth, observation):
-        """诊断 detail 构造（BroadcastRecord 十要素，timestamp 由落档补默认）。"""
+    def _detail(grade, channel, message, warnings, device, observation):
+        """诊断 detail 构造（timestamp 由落档补默认）。"""
         device_id, name, hardware, is_speaker = device or ("", "", None, None)
         return {
             "grade": int(grade),
@@ -594,7 +524,6 @@ class XiaoAISpeaker:
             "warnings": list(warnings or []),
             "device": {"device_id": device_id or "", "name": name or "",
                        "hardware": hardware, "is_speaker": is_speaker},
-            "synth": dict(synth or {}),
             "observation": dict(observation or {}),
         }
 
@@ -606,10 +535,10 @@ class XiaoAISpeaker:
                   2: "指令已接受未确认播放"}.get(grade, "播报失败")
         device = detail["device"]
         logger.info(
-            "%s: %s | 通道=%s 设备=%s(%s,%s) 合成=%s 观察=%s 警示=%s",
+            "%s: %s | 通道=%s 设备=%s(%s,%s) 观察=%s 警示=%s",
             prefix, str(text)[:80], channel,
             device["device_id"], device["name"], device["hardware"] or "未知",
-            detail["synth"], detail["observation"], detail["warnings"])
+            detail["observation"], detail["warnings"])
 
     # ---------- 课程提醒（scheduler.py 契约） ----------
 

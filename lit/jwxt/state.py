@@ -52,4 +52,10 @@ def update_state(updates: dict) -> None:
     tmp = state_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    if os.name != "nt":
+        try:
+            # 该文件含教务 cookies 域，与 credentials.json 同权限策略（0600）
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
     os.replace(tmp, state_path())

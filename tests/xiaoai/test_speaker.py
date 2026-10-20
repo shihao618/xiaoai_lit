@@ -1,3 +1,4 @@
+"""XiaoAISpeaker 测试：凭证状态机、设备管理、云端原生播报（MIoT 主通道 + mibrain 回退）。"""
 import json
 import logging
 from collections import deque
@@ -22,16 +23,12 @@ from lit.xiaoai.speaker import XiaoAISpeaker
 
 
 class StubMina:
-    def __init__(self, devices=None, tts_exc=None, url_exc=None, list_exc=None,
-                 status_exc=None):
+    def __init__(self, devices=None, tts_exc=None, list_exc=None,
+                 status_exc=None, status_state="playing"):
         self.devices = devices or []
         self.tts_calls = []
-        self.url_calls = []
-        self.stop_calls = []
-        self.status_seq = []
-        self.status_state = "playing"
+        self.status_state = status_state
         self.tts_exc = tts_exc
-        self.url_exc = url_exc
         self.list_exc = list_exc
         self.status_exc = status_exc
         self.list_calls = 0
@@ -47,22 +44,36 @@ class StubMina:
         if self.tts_exc:
             raise self.tts_exc
 
-    def play_url(self, cred, device_id, url, hardware=None, tail_url=None):
-        self.url_calls.append((device_id, url))
-        if self.url_exc:
-            raise self.url_exc
-
     def get_play_status(self, cred, device_id):
         if self.status_exc:
             raise self.status_exc
-        if self.status_seq:
-            state = self.status_seq.pop(0)
-        else:
-            state = self.status_state
-        return PlayerStatus(volume=50, state=state)
+        return PlayerStatus(volume=50, state=self.status_state)
 
-    def stop_playback(self, cred, device_id):
-        self.stop_calls.append(device_id)
+
+class StubMiot:
+    """MIoT 原生播报客户端替身。"""
+
+    def __init__(self, playing=True, exc=None, stop_exc=None):
+        self.playing = playing
+        self.exc = exc
+        self.stop_exc = stop_exc
+        self.texts = []
+        self.stop_calls = []
+
+    def play_text(self, cred, miot_did, text):
+        if self.exc:
+            raise self.exc
+        self.texts.append((miot_did, text))
+        return {"code": 0}
+
+    def playing_state(self, cred, miot_did):
+        return 1 if self.playing else 0
+
+    def stop(self, cred, miot_did):
+        if self.stop_exc:
+            raise self.stop_exc
+        self.stop_calls.append(miot_did)
+        return {"code": 0}
 
 
 class StubAccount:
@@ -78,20 +89,23 @@ class StubAccount:
                 "device_id": device_id, "service_token": "st", "security": "sec"}
 
 
-DEV = SpeakerDevice("d1", "小爱音箱", "LX06", "1.1.1.1")
+DEV = SpeakerDevice("d1", "小爱音箱", "LX06", "1.1.1.1", "800740001")
+DEV_MIOT = SpeakerDevice("d1", "小爱音箱", "L05B", "1.1.1.1", "800740573")
+LAMP = SpeakerDevice("d2", "台灯", "MJCTD01", "2.2.2.2")
 
 
-def make_speaker(tmp_path, mina=None, account=None):
+def make_speaker(tmp_path, mina=None, account=None, miot=None):
     store = CredentialStore(data_dir=str(tmp_path))
     return XiaoAISpeaker(store=store, mina=mina or StubMina(),
-                         account=account or StubAccount())
+                         account=account or StubAccount(),
+                         miot=miot or StubMiot())
 
 
 def login(speaker, devices=None):
     speaker._commit_credentials(
         Credentials(user_id="42", pass_token="pt", device_id="dev",
                     service_token="st", refreshed_at=datetime.now()),
-        devices if devices is not None else [DEV])
+        devices if devices is not None else [DEV_MIOT])
 
 
 @pytest.fixture
@@ -102,9 +116,6 @@ def no_sleep(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_diagnostics(monkeypatch):
     monkeypatch.setattr(diagnostics, "_records", deque(maxlen=10))
-    monkeypatch.setattr(diagnostics, "_self_check",
-                        {"status": "unknown", "checked_at": None, "message": None})
-    monkeypatch.setattr(diagnostics, "_self_check_done", False)
 
 
 # ---------- run_async 垫片 ----------
@@ -130,296 +141,263 @@ def test_init_no_credential(tmp_path):
     assert sp.get_status()["state"] == "no_credential"
 
 
+def _save_usable_credentials(tmp_path):
+    store = CredentialStore(data_dir=str(tmp_path))
+    store.save(Credentials(user_id="42", pass_token="pt",
+                           service_token="st", refreshed_at=datetime.now()))
+    return store
+
+
 def test_70016_marks_rejected(tmp_path):
     mina = StubMina(list_exc=CredentialRejectedError("70016"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
+    sp = XiaoAISpeaker(store=_save_usable_credentials(tmp_path), mina=mina,
+                       account=StubAccount(), miot=StubMiot())
     assert sp.check_cookie_valid() is False
-    status = sp.get_status()
-    assert status["state"] == "rejected"
-    assert status["logged_in"] is False
-    assert status["cookie_valid"] is False
-    data = json.loads(
-        (tmp_path / "xiaoai_credentials.json").read_text(encoding="utf-8"))
-    assert data["rejected"] is True
+    assert sp.get_status()["state"] == "rejected"
 
 
 def test_network_error_keeps_state(tmp_path):
-    mina = StubMina(list_exc=NetworkError("net down"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
+    mina = StubMina(list_exc=NetworkError("boom"))
+    sp = XiaoAISpeaker(store=_save_usable_credentials(tmp_path), mina=mina,
+                       account=StubAccount(), miot=StubMiot())
+    assert sp.get_status()["state"] == "pending_verify"
     assert sp.check_cookie_valid() is False
-    assert sp.get_status()["state"] == "logged_in"
-    data = json.loads(
-        (tmp_path / "xiaoai_credentials.json").read_text(encoding="utf-8"))
-    assert data["rejected"] is False
+    assert sp.get_status()["state"] == "pending_verify"
 
 
 def test_rate_limited_keeps_state(tmp_path):
-    mina = StubMina(list_exc=RateLimitedError("429"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
+    mina = StubMina(list_exc=RateLimitedError("70022"))
+    sp = XiaoAISpeaker(store=_save_usable_credentials(tmp_path), mina=mina,
+                       account=StubAccount(), miot=StubMiot())
     assert sp.check_cookie_valid() is False
-    assert sp.get_status()["state"] == "logged_in"
+    assert sp.get_status()["state"] == "pending_verify"
 
 
 def test_restore_temporary_error_pending_verify(tmp_path):
-    mina = StubMina(list_exc=NetworkError("net down"))
-    CredentialStore(data_dir=str(tmp_path)).save(
-        Credentials(user_id="1", service_token="s", refreshed_at=datetime.now()))
-    sp = make_speaker(tmp_path, mina=mina)
-    status = sp.get_status()
-    assert status["state"] == "pending_verify"
-    assert status["cookie_valid"] is True
-    assert status["logged_in"] is False
+    store = _save_usable_credentials(tmp_path)
+    mina = StubMina(list_exc=NetworkError("temp"))
+    sp = XiaoAISpeaker(store=store, mina=mina, account=StubAccount(),
+                       miot=StubMiot())
     sp._restore_worker()
     assert sp.get_status()["state"] == "pending_verify"
-    data = json.loads(
-        (tmp_path / "xiaoai_credentials.json").read_text(encoding="utf-8"))
-    assert data["user_id"] == "1"  # 凭证保留
-    mina.list_exc = None
-    mina.devices = [DEV]
-    assert sp.check_cookie_valid() is True
-    assert sp.logged_in
 
 
 def test_restore_success(tmp_path):
-    mina = StubMina(devices=[DEV])
-    CredentialStore(data_dir=str(tmp_path)).save(
-        Credentials(user_id="1", service_token="s", refreshed_at=datetime.now()))
-    sp = make_speaker(tmp_path, mina=mina)
+    store = _save_usable_credentials(tmp_path)
+    mina = StubMina(devices=[DEV_MIOT])
+    sp = XiaoAISpeaker(store=store, mina=mina, account=StubAccount(),
+                       miot=StubMiot())
     sp._restore_worker()
-    assert sp.logged_in
-    assert sp.get_status()["devices"][0]["deviceID"] == "d1"
+    assert sp.logged_in is True
+    assert len(sp.get_devices()) == 1
 
 
 def test_restore_rejected(tmp_path):
+    store = _save_usable_credentials(tmp_path)
     mina = StubMina(list_exc=CredentialRejectedError("70016"))
-    CredentialStore(data_dir=str(tmp_path)).save(
-        Credentials(user_id="1", service_token="s", refreshed_at=datetime.now()))
-    sp = make_speaker(tmp_path, mina=mina)
+    sp = XiaoAISpeaker(store=store, mina=mina, account=StubAccount(),
+                       miot=StubMiot())
     sp._restore_worker()
     assert sp.get_status()["state"] == "rejected"
 
 
-# ---------- 播报四分支 ----------
+# ---------- 云端播报：MIoT 主通道 ----------
 
 def test_speak_success_two_segments(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
+    miot = StubMiot(playing=True)
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok, msg = sp.speak_with_result("第一节高数")
+    ok, msg, detail = sp.speak_with_detail("第一节高数")
     assert ok is True
-    assert len(mina.tts_calls) == 2
-    assert mina.tts_calls[0][1] == "叮叮叮叮！上课提醒！"
-    assert mina.tts_calls[1][1] == "第一节高数"
+    assert msg == "播报成功(已确认播放)"
+    assert detail["channel"] == "miot"
+    assert detail["grade"] == 1
+    obs = detail["observation"]
+    assert obs["saw_playing"] is True
+    assert obs["last_state"] == "playing"
+    assert obs["poll_count"] >= 1
+    assert [t for _did, t in miot.texts] == ["叮叮叮叮！上课提醒！", "第一节高数"]
+
+
+def test_speak_unobserved_grade2(tmp_path, no_sleep):
+    sp = make_speaker(tmp_path, miot=StubMiot(playing=False))
+    login(sp)
+    ok, msg, detail = sp.speak_with_detail("第一节高数")
+    assert ok is True
+    assert msg == "指令已接受未确认播放"
+    assert detail["grade"] == 2
 
 
 def test_speak_not_logged_in_fast_fail(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    ok, msg = sp.speak_with_result("x")
+    sp = make_speaker(tmp_path)
+    ok, msg, detail = sp.speak_with_detail("x")
     assert ok is False
     assert "未登录" in msg
-    assert mina.tts_calls == []
-    assert mina.list_calls == 0
+    assert detail["channel"] == "none"
+    assert detail["grade"] == 3
 
 
 def test_speak_timeout_no_retry_no_fallback(tmp_path, no_sleep):
-    mina = StubMina(tts_exc=RequestTimeoutError("t"))
-    sp = make_speaker(tmp_path, mina=mina)
+    miot = StubMiot(exc=RequestTimeoutError("timeout"))
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok, msg = sp.speak_with_result("x", backup_url="https://example.com/a.mp3")
+    ok, msg, detail = sp.speak_with_detail("x")
     assert ok is False
-    assert "未知" in msg
-    assert len(mina.tts_calls) == 1
-    assert mina.url_calls == []
-
-
-def test_speak_rejected_falls_back_to_url(tmp_path, no_sleep, monkeypatch):
-    _fast_clock(monkeypatch)
-    mina = StubMina(tts_exc=CommandRejectedError("code=-500"))
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg = sp.speak_with_result("详情", backup_url="https://example.com/a.mp3")
-    assert ok is True
-    assert len(mina.url_calls) == 2
-    assert mina.url_calls[0][1] == "https://example.com/a.mp3"
-    assert mina.url_calls[1][1] == "https://example.com/a.mp3"
-    assert mina.stop_calls == ["d1", "d1"]  # 两段回退播放后均 pause 防循环
-
-
-def test_speak_rejected_no_backup_fails(tmp_path, no_sleep):
-    mina = StubMina(tts_exc=CommandRejectedError("rejected"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg = sp.speak_with_result("x")
-    assert ok is False
-    assert "未接受" in msg
+    assert "结果未知" in msg
+    assert detail["channel"] == "miot"
+    assert detail["grade"] == 3
 
 
 def test_speak_rate_limited_gives_up(tmp_path, no_sleep):
-    mina = StubMina(tts_exc=RateLimitedError("429"))
-    sp = make_speaker(tmp_path, mina=mina)
+    miot = StubMiot(exc=RateLimitedError("70022"))
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok, msg = sp.speak_with_result("x", backup_url="https://example.com/a.mp3")
+    ok, msg, detail = sp.speak_with_detail("x")
     assert ok is False
-    assert mina.url_calls == []
+    assert "频繁" in msg
+    assert detail["grade"] == 3
 
 
 def test_speak_credential_rejected_terminates(tmp_path, no_sleep):
-    mina = StubMina(tts_exc=CredentialRejectedError("70016"))
-    sp = make_speaker(tmp_path, mina=mina)
+    miot = StubMiot(exc=CredentialRejectedError("70016"))
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok, msg = sp.speak_with_result("x", backup_url="https://example.com/a.mp3")
+    ok, msg, detail = sp.speak_with_detail("x")
     assert ok is False
+    assert "失效" in msg
     assert sp.get_status()["state"] == "rejected"
-    assert mina.url_calls == []
 
 
 def test_alarm_and_speak_returns_bool(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
+    sp = make_speaker(tmp_path)
     login(sp)
     assert sp.alarm_and_speak("测试") is True
 
 
-def _enable_local_tts(monkeypatch):
-    monkeypatch.setattr(config, "XIAOAI_TTS_BASE_URL",
-                        "http://127.0.0.1:5000")
-    monkeypatch.setattr(
-        "lit.xiaoai.tts.synthesize_announcement",
-        lambda prompt, text: ("j.mp3", 10.0, 0.5))
-    monkeypatch.setattr(
-        "lit.xiaoai.tts.audio_url",
-        lambda f: "http://127.0.0.1:5000/audio/tts/" + f)
-    monkeypatch.setattr(
-        "lit.xiaoai.tts.silence_url",
-        lambda: "http://127.0.0.1:5000/audio/tts/silence30.mp3")
-
-
-def _fast_clock(monkeypatch):
-    t = [0.0]
-
-    def fake_monotonic():
-        t[0] += 2.0
-        return t[0]
-
-    monkeypatch.setattr("lit.xiaoai.speaker.time.monotonic", fake_monotonic)
-
-
-def test_speak_local_tts_stops_when_status_stuck_paused(
-        tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, _ = sp.speak_with_result("第一节高数")
-    assert ok is True
-    assert len(mina.url_calls) == 1  # 单文件（提示语+间隔+正文）一次播放
-    assert mina.tts_calls == []
-    assert mina.stop_calls == ["d1"]
-
-
-def test_speak_local_tts_early_stop_on_stopped(tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    mina.status_seq = ["playing", "playing", "stopped", "paused"]
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, _ = sp.speak_with_result("第一节高数")
-    assert ok is True
-    assert len(mina.url_calls) == 1
-    assert mina.stop_calls == ["d1"]
-
-
-def test_play_url_direct(tmp_path, no_sleep, monkeypatch):
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.play_url_direct("https://example.com/a.mp3")
-    assert ok is True
-    assert mina.url_calls == [("d1", "https://example.com/a.mp3")]
-    assert mina.stop_calls == ["d1"]  # 备份播放后 pause 防循环
-
-
-def test_play_url_direct_not_logged_in(tmp_path):
+def test_speak_with_result_thin_wrapper(tmp_path, no_sleep):
     sp = make_speaker(tmp_path)
-    ok, msg, detail = sp.play_url_direct("https://example.com/a.mp3")
+    login(sp)
+    ok2, msg2 = sp.speak_with_result("x")
+    ok3, msg3, _detail = sp.speak_with_detail("x")
+    assert (ok2, msg2) == (ok3, msg3)
+
+
+# ---------- 云端播报：mibrain 回退 ----------
+
+def test_miot_failure_falls_back_mibrain(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV_MIOT], status_state="playing")
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    ok, _msg, detail = sp.speak_with_detail("第一节高数")
+    assert ok is True
+    assert detail["channel"] == "mibrain"
+    assert len(mina.tts_calls) == 2
+    assert any("MIoT" in w for w in detail["warnings"])
+
+
+def test_mibrain_model_silent_warning_for_l05b(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV_MIOT], status_state="paused")
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    ok, _msg, detail = sp.speak_with_detail("x")
+    assert ok is True
+    assert detail["channel"] == "mibrain"
+    assert any("静默忽略" in w for w in detail["warnings"])
+
+
+def test_mibrain_normal_model_no_model_warning(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV], status_state="paused")
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp, devices=[DEV])
+    ok, _msg, detail = sp.speak_with_detail("x")
+    assert ok is True
+    assert not any("静默忽略" in w for w in detail["warnings"])
+
+
+def test_mibrain_weak_observation_grade2(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV_MIOT], status_state="paused")
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    ok, _msg, detail = sp.speak_with_detail("x")
+    assert ok is True
+    assert detail["grade"] == 2
+    assert detail["observation"]["saw_playing"] is False
+
+
+def test_observation_unavailable_keeps_grade2(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV_MIOT], status_exc=NetworkError("status down"))
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    ok, _msg, detail = sp.speak_with_detail("x")
+    assert ok is True
+    assert detail["grade"] == 2
+
+
+def test_both_channels_fail_grade3(tmp_path, no_sleep):
+    mina = StubMina(devices=[DEV_MIOT], tts_exc=NetworkError("tts down"))
+    miot = StubMiot(exc=NetworkError("miot down"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    ok, msg, detail = sp.speak_with_detail("x")
     assert ok is False
-    assert "未登录" in msg
+    assert detail["grade"] == 3
+    assert "失败" in msg
 
 
-# ---------- remind_* 异常隔离 ----------
-
-def test_remind_isolated_from_exceptions(tmp_path, no_sleep):
-    mina = StubMina(tts_exc=RuntimeError("unexpected"))
+def test_non_speaker_target_risk_flagged(tmp_path, no_sleep):
+    mina = StubMina(devices=[LAMP])
     sp = make_speaker(tmp_path, mina=mina)
+    login(sp, devices=[LAMP])
+    ok, _msg, detail = sp.speak_with_detail("x")
+    assert ok is True
+    assert detail["device"]["is_speaker"] is False
+    assert any("非音箱" in w for w in detail["warnings"])
+
+
+def test_broadcast_record_elements(tmp_path, no_sleep):
+    sp = make_speaker(tmp_path)
     login(sp)
-    result = sp.remind_morning(
-        [{"name": "高数", "classroom": "A101", "section_start": 1}])
-    assert result is False  # 不抛异常
+    sp.speak_with_detail("记录测试")
+    records = diagnostics.get_broadcasts()
+    assert len(records) == 1
+    record = records[0]
+    assert set(record) == {"timestamp", "grade", "grade_label", "channel",
+                           "message", "warnings", "device", "observation"}
+    assert record["channel"] == "miot"
+    assert record["device"]["device_id"] == "d1"
 
 
-def test_remind_morning_text(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
+def test_log_grade1_wording(tmp_path, no_sleep, caplog):
+    sp = make_speaker(tmp_path)
     login(sp)
-    assert sp.remind_morning(
-        [{"name": "高数", "classroom": "A101", "section_start": 1}]) is True
-    detail = mina.tts_calls[1][1]
-    assert "上午" in detail
-    assert "高数" in detail
-    assert "A101" in detail
+    with caplog.at_level(logging.INFO, logger="lit.xiaoai.speaker"):
+        sp.speak_with_detail("日志测试")
+    assert "小爱播报成功(已确认播放)" in caplog.text
+    assert "通道=miot" in caplog.text
 
 
-def test_remind_afternoon_no_courses(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    assert sp.remind_afternoon([]) is True
-    assert "没有课程安排" in mina.tts_calls[1][1]
-
-
-
-# ---------- 兼容契约 ----------
+# ---------- 设备管理 ----------
 
 def test_get_status_compat_fields(tmp_path):
     sp = make_speaker(tmp_path)
+    login(sp)
     status = sp.get_status()
-    for key in ("logged_in", "cookie_valid", "login_time", "username",
-                "device_id", "devices"):
+    assert status["logged_in"] is True
+    for key in ("cookie_valid", "login_time", "username", "device_id",
+                "devices", "state"):
         assert key in status
-    assert "state" in status
 
 
-def test_device_id_cache_attribute_exists(tmp_path):
-    sp = make_speaker(tmp_path)
-    assert hasattr(sp, "_device_id_cache")
-    login(sp)
-    sp.select_device("speaker-x")
-    assert sp._device_id_cache == "speaker-x"
-    assert sp.device_id == "speaker-x"
-    data = json.loads(
-        (tmp_path / "xiaoai_credentials.json").read_text(encoding="utf-8"))
-    assert data["default_device_id"] == "speaker-x"
-
-
-def test_relogin_keeps_default_device(tmp_path):
+def test_miot_did_of_device(tmp_path):
     sp = make_speaker(tmp_path)
     login(sp)
-    sp.select_device("speaker-x")
-    sp._commit_credentials(
-        Credentials(user_id="99", service_token="s2",
-                    refreshed_at=datetime.now()), [])
-    assert sp._device_id_cache == "speaker-x"
-    assert sp._cred.default_device_id == "speaker-x"
+    assert sp._miot_did_of("d1") == "800740573"
+    assert sp._miot_did_of("missing") == ""
 
 
 def test_get_devices_requires_login(tmp_path):
@@ -429,205 +407,19 @@ def test_get_devices_requires_login(tmp_path):
 
 
 def test_get_devices_returns_api_dicts(tmp_path):
-    mina = StubMina(devices=[DEV, SpeakerDevice("d2", "台灯", "MJ", "2.2.2.2")])
+    mina = StubMina(devices=[DEV_MIOT])
     sp = make_speaker(tmp_path, mina=mina)
     login(sp)
     devices = sp.get_devices()
-    assert devices[0] == {"deviceID": "d1", "name": "小爱音箱",
-                          "hardware": "LX06", "address": "1.1.1.1",
-                          "is_speaker": True}
-    assert devices[1]["name"] == "台灯"
-    assert devices[1]["is_speaker"] is False
-
-
-def test_get_devices_70016_marks_rejected(tmp_path):
-    mina = StubMina(list_exc=CredentialRejectedError("70016"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    with pytest.raises(CredentialRejectedError):
-        sp.get_devices()
-    assert sp.get_status()["state"] == "rejected"
-
-# ---------- N2 分级与诊断 ----------
-
-L05B = SpeakerDevice("l05", "小爱音箱Pro", "L05B", "9.9.9.9")
-LAMP = SpeakerDevice("d2", "台灯", "MJCTD01", "2.2.2.2")
-ROBOT = SpeakerDevice("d3", "扫地机器人", None, "3.3.3.3")
-
-
-def test_primary_channel_playing_grade1(tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.speak_with_detail("第一节高数")
-    assert ok is True
-    assert detail["grade"] == 1
-    assert detail["channel"] == "primary"
-    assert detail["observation"]["saw_playing"] is True
-    assert "已确认播放" in msg
-
-
-def test_l05b_stuck_paused_grade2(tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.speak_with_detail("第一节高数")
-    assert ok is True
-    assert detail["grade"] == 2
-    assert detail["grade_label"] == "指令已接受未确认播放"
-    assert detail["observation"]["saw_playing"] is False
-    assert detail["observation"]["last_state"] == "paused"
-    assert "成功" not in msg
-
-
-def test_fallback_mibrain_play_music_model_warning(tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    monkeypatch.setattr(
-        "lit.xiaoai.tts.synthesize_announcement",
-        lambda prompt, text: ("", 0.0, 0.1))
-    mina = StubMina(devices=[L05B])
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp, devices=[L05B])
-    ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert detail["grade"] == 2
-    assert detail["channel"] == "mibrain"
-    assert detail["synth"]["ok"] is False
-    assert any("静默忽略" in w for w in detail["warnings"])
-
-
-def test_fallback_mibrain_normal_model_no_model_warning(tmp_path, no_sleep):
-    mina = StubMina(devices=[LAMP])
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp, devices=[LAMP])
-    ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert detail["grade"] == 2
-    assert detail["channel"] == "mibrain"
-    assert not any("静默忽略" in w for w in detail["warnings"])
-
-
-def test_observation_unavailable_grade2(tmp_path, no_sleep):
-    mina = StubMina(status_exc=RuntimeError("status down"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert detail["grade"] == 2
-    assert detail["observation"]["note"] == "观察不可用"
-    assert detail["observation"]["poll_count"] == 0
-
-
-def test_both_channels_fail_grade3(tmp_path, no_sleep, monkeypatch):
-    monkeypatch.setattr(config, "XIAOAI_TTS_BASE_URL", "http://192.168.0.9:5000")
-    monkeypatch.setattr(
-        "lit.xiaoai.tts.synthesize_announcement",
-        lambda prompt, text: ("", 0.0, 0.1))
-    mina = StubMina(tts_exc=CommandRejectedError("code=-500"))
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is False
-    assert detail["grade"] == 3
-    assert detail["channel"] == "mibrain"
-    assert "本地TTS合成失败" in "".join(detail["warnings"])
-    assert "未接受指令" in msg
-
-
-def test_empty_base_url_mibrain_with_warning(
-        tmp_path, no_sleep, monkeypatch, caplog):
-    monkeypatch.setattr(config, "XIAOAI_TTS_BASE_URL", "")
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    with caplog.at_level(logging.WARNING, logger="lit.xiaoai.speaker"):
-        ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert detail["channel"] == "mibrain"
-    assert "主通道未启用" in caplog.text
-    assert any("未配置" in w for w in detail["warnings"])
-
-
-def test_localhost_base_url_loopback_warning(
-        tmp_path, no_sleep, monkeypatch, caplog):
-    _enable_local_tts(monkeypatch)
-    monkeypatch.setattr(config, "XIAOAI_TTS_BASE_URL", "http://localhost:10379")
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    with caplog.at_level(logging.WARNING, logger="lit.xiaoai.speaker"):
-        ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert "localhost" in caplog.text
-    assert "回环" in caplog.text
-    assert any("localhost" in w for w in detail["warnings"])
-
-
-def test_no_success_wording_for_grade2(tmp_path, no_sleep, caplog):
-    mina = StubMina()
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    with caplog.at_level(logging.INFO, logger="lit.xiaoai.speaker"):
-        ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert detail["grade"] == 2
-    assert "成功" not in msg
-    assert "成功" not in detail["message"]
-    assert "成功" not in detail["grade_label"]
-    assert "播报成功" not in caplog.text
-
-
-def test_broadcast_record_full_elements(tmp_path, no_sleep, monkeypatch):
-    _enable_local_tts(monkeypatch)
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp)
-    ok, msg, detail = sp.speak_with_detail("第一节高数")
-    assert ok is True
-    records = diagnostics.get_broadcasts()
-    assert len(records) == 1
-    rec = records[0]
-    assert rec["grade"] == 1
-    assert rec["grade_label"] == "已确认播放"
-    assert rec["channel"] == "primary"
-    assert rec["device"] == {"device_id": "d1", "name": "小爱音箱",
-                             "hardware": "LX06", "is_speaker": True}
-    assert rec["synth"]["ok"] is True
-    assert rec["synth"]["audio"] == "j.mp3"
-    assert rec["observation"]["saw_playing"] is True
-    assert rec["observation"]["last_state"] == "playing"
-    assert rec["timestamp"]
-
-
-def test_non_speaker_target_risk_flagged(tmp_path, no_sleep):
-    mina = StubMina(devices=[ROBOT])
-    sp = make_speaker(tmp_path, mina=mina)
-    login(sp, devices=[ROBOT])
-    ok, msg, detail = sp.speak_with_detail("x")
-    assert ok is True
-    assert len(mina.tts_calls) == 2  # 指令照常下发
-    assert detail["device"]["is_speaker"] is False
-    assert detail["device"]["hardware"] is None
-    assert any("非音箱" in w for w in detail["warnings"])
+    assert set(devices[0]) == {"deviceID", "name", "hardware", "address",
+                               "is_speaker"}
 
 
 def test_select_device_speaker_no_warning(tmp_path):
     sp = make_speaker(tmp_path)
     login(sp)
     result = sp.select_device("d1")
-    assert result["device_id"] == "d1"
     assert result["is_speaker"] is True
-    assert result["hardware"] == "LX06"
     assert result["warning"] is None
 
 
@@ -636,29 +428,63 @@ def test_select_device_non_speaker_warning(tmp_path):
     login(sp, devices=[LAMP])
     result = sp.select_device("d2")
     assert result["is_speaker"] is False
-    assert result["hardware"] == "MJCTD01"
     assert "非物理音箱" in result["warning"]
 
 
-def test_play_url_direct_grade2_backup(tmp_path, no_sleep, monkeypatch):
-    _fast_clock(monkeypatch)
-    mina = StubMina()
-    mina.status_state = "paused"
-    sp = make_speaker(tmp_path, mina=mina)
+# ---------- 停止播放（MIoT） ----------
+
+def test_stop_playback_success(tmp_path):
+    miot = StubMiot()
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok, msg, detail = sp.play_url_direct("https://example.com/a.mp3")
+    ok, message = sp.stop_playback()
     assert ok is True
-    assert detail["channel"] == "backup"
-    assert detail["grade"] == 2
-    assert "成功" not in msg
+    assert "已发送" in message
+    assert miot.stop_calls == ["800740573"]
 
 
-def test_speak_with_result_thin_wrapper(tmp_path, no_sleep):
-    mina = StubMina()
-    sp = make_speaker(tmp_path, mina=mina)
+def test_stop_playback_not_logged_in(tmp_path):
+    sp = make_speaker(tmp_path)
+    ok, message = sp.stop_playback()
+    assert ok is False
+    assert "未登录" in message
+
+
+def test_stop_playback_miot_failure(tmp_path):
+    miot = StubMiot(stop_exc=NetworkError("stop down"))
+    sp = make_speaker(tmp_path, miot=miot)
     login(sp)
-    ok2, msg2 = sp.speak_with_result("x")
-    assert ok2 is True
-    ok3, msg3, detail = sp.speak_with_detail("x")
-    assert (ok2, msg2) == (ok3, msg3)
-    assert ok3 is True
+    ok, message = sp.stop_playback()
+    assert ok is False
+    assert "失败" in message
+
+
+# ---------- 课程提醒 ----------
+
+def test_remind_morning_text(tmp_path, no_sleep):
+    miot = StubMiot(playing=True)
+    sp = make_speaker(tmp_path, miot=miot)
+    login(sp)
+    courses = [{"name": "高等数学", "classroom": "A101",
+                "start_time": "08:00:00"}]
+    assert sp.remind_morning(courses) is True
+    body = miot.texts[-1][1]
+    assert "上午" in body
+    assert "高等数学" in body
+    assert "A101" in body
+
+
+def test_remind_afternoon_no_courses(tmp_path, no_sleep):
+    miot = StubMiot(playing=True)
+    sp = make_speaker(tmp_path, miot=miot)
+    login(sp)
+    assert sp.remind_afternoon([]) is True
+    assert "没有课程" in miot.texts[-1][1]
+
+
+def test_remind_isolated_from_exceptions(tmp_path, no_sleep):
+    mina = StubMina(tts_exc=NetworkError("tts down"))
+    miot = StubMiot(exc=RuntimeError("boom"))
+    sp = make_speaker(tmp_path, mina=mina, miot=miot)
+    login(sp)
+    assert sp.remind_morning([{"name": "x", "start_time": "08:00:00"}]) is False

@@ -1,0 +1,67 @@
+# 洛阳理工学院课表提醒服务 —— 飞牛 OS（fnOS）专用 Docker Compose
+#
+# 场景：fnOS 应用中心 Docker → Compose 新建项目，工作目录 = 本仓库根目录，
+#      compose 文件 = docker-compose.fnos.yml，构建并启动即可。
+# 说明：
+#   - 播报走云端 MIoT 原生文字播报，不需要局域网 IP / 额外端口放行，
+#     10379 仅用于 Web 管理页面。
+#   - 命名卷显式命名为 lit_lit-data / lit_lit-cache：升级、重建项目、
+#     更换目录都不会丢数据（与普通 docker compose 部署共用同一份卷）。
+#   - 容器非 root（appuser）运行；命名卷由 Docker 管理，规避 NAS 宿主目录权限问题。
+#   - 若改端口：在 .env 或 shell 中设置 WEB_PORT（默认 10379）。
+
+services:
+  lit-course-reminder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lit-course-reminder:latest
+    container_name: lit-course-reminder
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - "no-new-privileges:true"
+    stop_grace_period: 35s
+    ports:
+      - "${WEB_PORT:-10379}:10379"
+    environment:
+      # ---- 教务系统 ----
+      - JWXT_BASE_URL=${JWXT_BASE_URL:-https://lljw.lit.edu.cn}
+      # 引导凭证（首次登录用；成功后以数据卷内持久化凭证为准）
+      - JWXT_ACCOUNT=${JWXT_ACCOUNT:-}
+      - JWXT_PASSWORD=${JWXT_PASSWORD:-}
+      # ---- 业务参数 ----
+      - REMIND_BEFORE_MINUTES=${REMIND_BEFORE_MINUTES:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # 可选：Cookie 检查间隔（秒，默认 1800 = 30 分钟）
+      # - COOKIE_REFRESH_INTERVAL=1800
+      # ---- 持久化路径（与下方命名卷挂载点一致，勿改） ----
+      - CACHE_DIR=/app/cache
+      - DATA_DIR=/app/data
+    volumes:
+      - lit-data:/app/data
+      - lit-cache:/app/cache
+    healthcheck:
+      # 与 Dockerfile HEALTHCHECK 一致（镜像内 python urllib 探活）
+      # start_period 90s：NAS 低功耗 CPU 首次导入 onnxruntime 可能较慢
+      test:
+        - CMD
+        - python
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:10379/api/status', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # 显式命名：不随 compose 项目名变化，保证升级/重建后数据仍在
+  lit-data:
+    name: lit_lit-data
+  lit-cache:
+    name: lit_lit-cache

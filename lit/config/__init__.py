@@ -1,12 +1,11 @@
 import os
 
 from .jwxt import JWXT_BASE_URL, JWXT_ACCOUNT, JWXT_PASSWORD, XNXQDM
-from .xiaoai import XIAOAI_TTS_BACKUP_URL, XIAOAI_TTS_BASE_URL
 
 # 通用配置：调度提醒提前量（原 schedule.py）
 REMIND_BEFORE_MINUTES = int(os.getenv("REMIND_BEFORE_MINUTES", "30"))
 
-COOKIE_REFRESH_INTERVAL = int(os.getenv("COOKIE_REFRESH_INTERVAL", "3600"))
+COOKIE_REFRESH_INTERVAL = int(os.getenv("COOKIE_REFRESH_INTERVAL", "1800"))
 
 # 通用配置：路径与日志（原 paths.py）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,7 +15,6 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 __all__ = [
     "JWXT_BASE_URL", "JWXT_ACCOUNT", "JWXT_PASSWORD", "XNXQDM",
-    "XIAOAI_TTS_BACKUP_URL", "XIAOAI_TTS_BASE_URL",
     "REMIND_BEFORE_MINUTES", "COOKIE_REFRESH_INTERVAL",
     "BASE_DIR", "CACHE_DIR", "DATA_DIR", "LOG_LEVEL",
 ]

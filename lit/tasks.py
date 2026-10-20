@@ -6,10 +6,11 @@
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.base import SchedulerNotRunningError
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from lit import config
-from lit.xiaoai import tts
 
 logger = logging.getLogger(__name__)
 
@@ -95,23 +96,18 @@ class BackgroundTasks:
         self.check_jwxt_cookie()
         self.check_xiaoai_cookie()
 
-    def _purge_tts_cache(self):
-        try:
-            logger.info("开始清理TTS缓存...")
-            count, size = tts.purge_cache()
-            logger.info("TTS缓存清理完成: 删除 %d 个文件 / %d 字节", count, size)
-        except Exception as e:
-            logger.error(f"TTS缓存清理任务异常: {e}")
-
     def start(self):
+        # COOKIE_REFRESH_INTERVAL 秒（默认 1800）→ 每 30 分钟检查双系统 Cookie；
+        # 配置项此前未被消费，这里按 config 值生效（IntervalTrigger 避免 cron 对齐限制）。
+        interval = config.COOKIE_REFRESH_INTERVAL
         self.scheduler.add_job(
             self.refresh_all,
-            CronTrigger(minute="*/30"),
+            IntervalTrigger(seconds=interval),
             id="cookie_refresh",
             replace_existing=True,
         )
         self.scheduler.start()
-        logger.info("Cookie管理器已启动，每30分钟检查一次")
+        logger.info("Cookie管理器已启动，每 %d 秒（约 %d 分钟）检查一次", interval, interval // 60)
         try:
             self.check_xiaoai_cookie()
         except Exception as e:
@@ -120,15 +116,22 @@ class BackgroundTasks:
         self.refresh_course_table()
         self.scheduler.add_job(self.refresh_course_table, CronTrigger(hour=6, minute=0), id="refresh_daily", replace_existing=True)
         logger.info("已设置每日06:00刷新课表")
-        self.scheduler.add_job(
-            self._purge_tts_cache,
-            CronTrigger(hour=6, minute=5),
-            id="tts_cache_cleanup",
-            replace_existing=True,
-        )
-        logger.info("已设置每日06:05清理TTS缓存")
+        logger.info("已设置每日06:00刷新课表")
 
     def stop(self):
-        self.scheduler.shutdown()
+        """停止调度器（幂等）：未启动/已停止时 shutdown 抛 SchedulerNotRunningError，
+        这里兜住，保证本地 finally 与 gunicorn atexit 重复调用都安全。
+
+        wait=False：SIGTERM 停机不等待长耗时 job（课表刷新/播报），
+        后台线程为 daemon，进程可立即退出。
+        """
+        try:
+            self.scheduler.shutdown(wait=False)
+        except SchedulerNotRunningError:
+            logger.info("调度器未运行，跳过停止")
+            return
+        except Exception as e:
+            logger.error(f"停止调度器异常（已忽略）: {e}")
+            return
         logger.info("调度器已停止")
         logger.info("Cookie管理器已停止")
