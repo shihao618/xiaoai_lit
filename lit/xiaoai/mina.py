@@ -27,6 +27,14 @@ USE_PLAY_MUSIC_HARDWARE = frozenset({
 })
 
 
+def is_speaker_hardware(hardware, name) -> bool:
+    """设备是否疑似物理音箱（前后端统一判定事实源，自 speaker._is_speaker 平移）。"""
+    hw = hardware or ""
+    display = name or ""
+    return (hw.startswith("L") or "speaker" in hw.lower() or "Sound" in hw
+            or "小爱" in display or "音箱" in display)
+
+
 @dataclass
 class SpeakerDevice:
     device_id: str
@@ -40,6 +48,7 @@ class SpeakerDevice:
             "name": self.name,
             "hardware": self.hardware,
             "address": self.address,
+            "is_speaker": is_speaker_hardware(self.hardware, self.name),
         }
 
 
