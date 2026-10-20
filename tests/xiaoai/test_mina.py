@@ -9,7 +9,12 @@ from lit.xiaoai.exceptions import (
     CredentialRejectedError,
     ResponseFormatError,
 )
-from lit.xiaoai.mina import MiNAClient, parse_play_status
+from lit.xiaoai.mina import (
+    MiNAClient,
+    SpeakerDevice,
+    is_speaker_hardware,
+    parse_play_status,
+)
 
 
 class StubHTTP:
@@ -43,8 +48,9 @@ def test_device_list_parsing_and_api_dict():
     devices = MiNAClient(http).device_list(make_cred())
     assert devices[0].to_api_dict() == {
         "deviceID": "d1", "name": "小爱音箱", "hardware": "LX06",
-        "address": "1.2.3.4"}
+        "address": "1.2.3.4", "is_speaker": True}
     assert devices[1].to_api_dict()["name"] == "台灯"
+    assert devices[1].to_api_dict()["is_speaker"] is False
     call = http.calls[0]
     assert call["url"] == constants.MINA_BASE_URL + "/admin/v2/device_list"
     assert call["params"]["master"] == "0"
@@ -259,3 +265,29 @@ def test_get_play_status_unrecognized():
     http = StubHTTP(handler=lambda c: ({"code": 0, "data": {}}, None))
     with pytest.raises(ResponseFormatError):
         MiNAClient(http).get_play_status(make_cred(), "dev")
+
+# ---------- N4 音箱身份判定 ----------
+
+def test_is_speaker_hardware_positive_matrix():
+    assert is_speaker_hardware("LX06", "") is True
+    assert is_speaker_hardware("L05B", None) is True
+    assert is_speaker_hardware("XXSPEAKERXX", "") is True  # speaker 大小写不敏感
+    assert is_speaker_hardware("XXSoundXX", "") is True
+    assert is_speaker_hardware(None, "小爱同学") is True
+    assert is_speaker_hardware("", "客厅音箱") is True
+
+
+def test_is_speaker_hardware_negative_matrix():
+    assert is_speaker_hardware("MJCTD01", "台灯") is False
+    assert is_speaker_hardware("soundbar", "电视") is False  # Sound 大小写敏感
+    assert is_speaker_hardware(None, None) is False
+    assert is_speaker_hardware(None, "扫地机器人") is False
+
+
+def test_to_api_dict_is_speaker_consistent():
+    speaker = SpeakerDevice("d1", "小爱音箱", "LX06", "1.1.1.1").to_api_dict()
+    lamp = SpeakerDevice("d2", "台灯", "MJCTD01", "2.2.2.2").to_api_dict()
+    assert speaker["is_speaker"] is is_speaker_hardware("LX06", "小爱音箱")
+    assert speaker["is_speaker"] is True
+    assert lamp["is_speaker"] is is_speaker_hardware("MJCTD01", "台灯")
+    assert lamp["is_speaker"] is False
