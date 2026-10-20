@@ -36,7 +36,7 @@ lit/web/             Flask 应用工厂 + 4 个蓝图 + templates/index.html
 lit/tasks.py         单调度器后台任务（课表刷新/提醒/Cookie 检查/缓存清理）
 tests/               单元测试（jwxt / xiaoai / 任务调度），fixtures/ 存放脱敏样本
 Dockerfile           多阶段镜像构建；docker-compose.yml 单容器编排
-docker-compose.fnos.yml  飞牛OS（fnOS）构建安装编排（命名卷显式固定、start_period 90s）
+docker-compose.fnos.yml  飞牛OS（fnOS）构建安装编排（本地目录持久化、PUID/PGID、start_period 90s）
 docker-compose.fnos-image.yml  飞牛OS 免构建安装（直接拉取 GHCR 预构建镜像）
 docker-compose.fnos.env.example  fnOS 环境变量模板（复制为 .env）
 .github/workflows/tests.yml  push/PR 自动跑测试（发布门禁）
@@ -63,7 +63,7 @@ docker compose up -d --build
 1. 教务配置区填写账号密码登录（或经环境变量预置引导凭证）
 2. 小爱配置区扫码登录音箱账号
 
-登录成功后凭证自动持久化到命名卷，容器重启/掉线均自动恢复，无需重复登录。
+登录成功后凭证自动持久化到数据目录（本机默认为命名卷；飞牛OS 为项目目录 `data/`），容器重启/掉线均自动恢复，无需重复登录。
 
 > **播报无需局域网 IP**：原生播报由小米 IoT 云执行，不需要音箱访问宿主机地址；换 IP / DHCP 均不影响播报。
 
@@ -284,12 +284,12 @@ CI（GitHub Actions）：
 | 账号锁定/冷却 | **勿手动反复重试**——系统在锁定期自动零请求等待解锁（日志含解锁时间），持续失效请到配置页重新登录 |
 | 日志"凭证疑似失效" | 教务账号密码已变更——前端重新登录即可（自动重登已停止，防反复试错触发风控） |
 | 教务接口异常 | 自动缓存降级：当日缓存有效时按缓存提醒（宁可多提醒不可停提醒）；跨周缓存自动弃用，不会播报过期课表 |
-| Windows 宿主目录直接挂载（bind mount）失败 | 本项目仅支持命名卷部署（non-root 运行 + Windows 权限语义限制），不提供以 root 运行的降级方案 |
+| Windows 宿主目录直接挂载（bind mount）失败 | Windows 下请用命名卷（默认 `docker-compose.yml`）；飞牛OS/Linux 请用专用编排的本地目录方案（见「飞牛 OS 部署」），两者分别适配各平台权限语义 |
 | 周次徽章显示"学期外" | 寒暑假正常显示（教务接口无当日教学周数据）；开学后自动恢复为"第 N 周" |
 | 播报提示成功但音箱无声 | ①**先检查音箱是否被静音**（音箱静音时接口仍返回成功；米家 App 或语音"取消静音"）②查看日志是否有 `MIoT 服务令牌获取成功`；令牌失效会自动重建，失败则重新扫码登录小爱账号 ③页面"播报诊断"看通道/分级/警示 ④现场听音核对 |
 | 需要立刻停止播报 | `curl -X POST http://127.0.0.1:10379/api/xiaoai/stop_playback`（局域网内换成宿主机 IP 同理） |
 | 页面提示"指令已接受未确认播放" | 这是**正常分级语义**：云端已受理并下发设备，但应用没观察到设备处于播放状态（MIoT 播放状态属性读取不稳定）。①先确认音箱**音量/静音/勿扰**状态（米家 App）②以现场听音为准 |
 | 播报无声但日志显示播报成功 | 检查音箱音量是否为 0、是否开启勿扰/夜间模式（米家 App），再点页面"播报测试"确认 |
-| 容器启动即退出/反复重启 | `docker logs lit-course-reminder` 查看：常见为 `requirements.txt` 缺 gunicorn（容器入口依赖它）、依赖安装失败或数据卷权限异常；数据目录必须用命名卷，勿改 bind mount |
+| 容器启动即退出/反复重启 | `docker logs lit-course-reminder` 查看：常见为 `requirements.txt` 缺 gunicorn（容器入口依赖它）、依赖安装失败或数据目录权限异常。Windows 用命名卷；飞牛OS 用专用编排的本地目录，需先创建目录并 `chown 1000:1000` |
 | 页面/接口超时或 502 | 先 `docker compose config` 校验配置，再确认端口映射 10379 与宿主机防火墙；日志出现 `WORKER TIMEOUT` 可调大 Dockerfile 中 `--timeout`（gthread 下该值是 worker 心跳超时，不是单请求超时） |
 | 构建慢/拉取失败 | Python 依赖走清华 PyPI 镜像；基础镜像默认 DaoCloud 国内加速，可 `docker compose build --build-arg BASE_IMAGE=python:3.11-slim` 或改 Dockerfile ARG 切换源 |
