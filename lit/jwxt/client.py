@@ -5,6 +5,7 @@
   fetch_week_courses(zc=N) 当周直查 → 五元组缓存落盘；
 ②登录：凭证解析（持久化优先）→ OCR+AES → cookies 落盘 + 凭证持久化；
 ③自动重登：四重前置判定（锁定敬畏/凭证错误/无凭证/预算）+ 失败分级；
+  失效后每周期自动重试，验证码错误换图重试，网络异常不误判失效；
 ④学期切换：TodayContext.xnxqdm ≠ 缓存值 → 更新域 + 缓存重查。
 """
 import logging
@@ -19,8 +20,15 @@ MAX_FAILED_ATTEMPTS = lock.MAX_FAILED_ATTEMPTS
 COOLDOWN_MINUTES = lock.COOLDOWN_MINUTES
 
 RELOGIN_DAILY_BUDGET = 5
+# 自动重登时登录尝试次数（每次换新验证码；OCR 偶发识别错误不至于等到下个周期）
+RELOGIN_LOGIN_ATTEMPTS = 2
 
 _CREDENTIAL_ERROR_MARKERS = ("账号", "密码", "用户名")
+
+# 会话探活三态：网络异常不应被当作会话失效（否则会误耗重登预算）
+_PROBE_OK = "ok"
+_PROBE_INVALID = "invalid"
+_PROBE_TRANSIENT = "transient"
 
 
 class JWXTClient:
@@ -81,34 +89,49 @@ class JWXTClient:
         return False, None
 
     def check_cookie_valid(self):
-        """真实校验：curMonthXnxq 轻量探活（design 1.2.6 拆层修正）。
+        """周期校验入口：会话有效则探活确认；失效/已知失效则尝试自动重登。
 
-        探活成功顺便更新今日上下文与 xnxqdm 缓存；失效检出（code<0 /
-        网络异常 / 结构异常 → 会话失效语义）触发 _try_auto_relogin
-        （链路③触发点 1）。周期标志仅在真实校验入口重置。
+        修复点（掉线后不再"永久失效"）：
+        - 每次调用都重置周期标志，因此自动重登失败后下个检查周期仍会重试；
+        - 已知 cookie_valid=False 时也走自动重登，而不是直接返回 False
+          （旧实现该分支导致 Cookie 失效标志粘住、永不恢复）；
+        - 网络异常与会话失效区分：网络异常不改会话状态、不消耗重登预算。
         """
-        if not self.cookie_valid:
-            return False
         self._relogin_tried_this_cycle = False
+        if self.cookie_valid:
+            status = self._probe_session()
+            if status == _PROBE_OK:
+                logger.info("教务系统Cookie有效")
+                self.logged_in = True
+                return True
+            if status == _PROBE_TRANSIENT:
+                return False
+            logger.warning("教务系统Cookie失效，尝试自动重登")
+            self.cookie_valid = False
+        return self._try_auto_relogin()
+
+    def _probe_session(self):
+        """curMonthXnxq 轻量探活：返回 _PROBE_OK / _PROBE_INVALID / _PROBE_TRANSIENT。
+
+        code<0（含返回登录页导致的 JSON 解析失败）与结构异常 → 会话失效；
+        网络层异常/超时 → 暂时性，不判失效（避免误耗自动重登预算）。
+        """
         try:
             ctx = api.term_code.fetch_today_context(self.session, self.base_url, date.today())
+        except ValueError as e:
+            logger.warning(f"教务系统Cookie检查失败（会话失效）: {e}")
+            return _PROBE_INVALID
         except Exception as e:
-            logger.warning(f"教务系统Cookie检查失败: {e}")
-            self.cookie_valid = False
-            self._try_auto_relogin()
-            return False
+            logger.warning(f"教务系统Cookie检查失败（网络异常，暂不判失效）: {e}")
+            return _PROBE_TRANSIENT
         if ctx is None:
             logger.warning("教务系统Cookie检查失败: 学期上下文结构异常")
-            self.cookie_valid = False
-            self._try_auto_relogin()
-            return False
+            return _PROBE_INVALID
         self.today_context = ctx
         if ctx.xnxqdm and ctx.xnxqdm != self.xnxqdm:
             self.xnxqdm = ctx.xnxqdm
             state.update_state({"xnxqdm": ctx.xnxqdm, "updated": datetime.now().isoformat()})
-        logger.info("教务系统Cookie有效")
-        self.logged_in = True
-        return True
+        return _PROBE_OK
 
     def get_captcha_image(self):
         return api.login.get_captcha_image(self.session, self.base_url)
@@ -123,7 +146,7 @@ class JWXTClient:
             logger.warning(msg)
             return {"success": False, "message": msg, "locked": True, "lock_time": lock_time.isoformat()}
 
-        if self.check_cookie_valid():
+        if self.cookie_valid and self._probe_session() == _PROBE_OK:
             return {"success": True, "message": "Cookie有效，无需重新登录"}
 
         last_msg = "登录失败"
@@ -165,6 +188,12 @@ class JWXTClient:
 
                 msg = result.get("message", "登录失败")
                 last_msg = msg
+
+                # 验证码识别错误属临时性：不累计锁定计数、不触发冷却，换一张重试即可
+                if "验证码" in msg:
+                    logger.warning(f"登录验证码错误，重试: {msg}")
+                    continue
+
                 self._failed_attempts += 1
                 logger.warning(f"登录失败({self._failed_attempts}): {msg}")
 
@@ -178,6 +207,10 @@ class JWXTClient:
                     logger.error(f"账号被锁定，停止登录尝试，解锁时间: {self._lock_until or self._cooldown_until}")
                     return {"success": False, "message": msg, "locked": True,
                             "lock_time": (self._lock_until or self._cooldown_until).isoformat()}
+
+                if any(marker in msg for marker in _CREDENTIAL_ERROR_MARKERS):
+                    logger.warning(f"登录失败（凭证错误，不再重试）: {msg}")
+                    return {"success": False, "message": msg}
 
                 if self._failed_attempts >= MAX_FAILED_ATTEMPTS:
                     self._cooldown_until = datetime.now() + timedelta(minutes=COOLDOWN_MINUTES)
@@ -214,7 +247,7 @@ class JWXTClient:
             return False
         self._relogin_tried_this_cycle = True
         self.account, self.password = resolved
-        result = self.login()
+        result = self.login(max_retries=RELOGIN_LOGIN_ATTEMPTS)
         if result.get("success"):
             logger.info("自动重登成功")
             return True
@@ -289,12 +322,10 @@ class JWXTClient:
         if not self.account or not self.password:
             logger.warning("账号密码未配置，跳过课表获取")
             return self._fallback_to_cache(today)
+        # 每次课表刷新视为新周期：确保"上周期已尝试"标志不阻塞本轮恢复
+        self._relogin_tried_this_cycle = False
         if not self.logged_in and not self.check_cookie_valid():
-            if self._relogin_tried_this_cycle:
-                return self._fallback_to_cache(today)
-            result = self.login()
-            if not result.get("success"):
-                return self._fallback_to_cache(today)
+            return self._fallback_to_cache(today)
         for attempt in range(2):
             try:
                 courses = self._refresh_week_courses(today)

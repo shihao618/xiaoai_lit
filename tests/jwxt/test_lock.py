@@ -73,7 +73,7 @@ def _drive_failures(client, monkeypatch, message, attempts):
 def test_login_three_failures_enter_cooldown(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
     before = datetime.now()
-    result = _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
+    result = _drive_failures(client, monkeypatch, "登录失败", MAX_FAILED_ATTEMPTS)
     assert result["success"] is False
     assert result["locked"] is True
     assert client._failed_attempts == MAX_FAILED_ATTEMPTS
@@ -95,7 +95,7 @@ def test_login_lock_message_takes_priority(isolated_dirs, monkeypatch):
 
 def test_lock_persistence_roundtrip(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
-    _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
+    _drive_failures(client, monkeypatch, "登录失败", MAX_FAILED_ATTEMPTS)
     assert os.path.exists(os.path.join(isolated_dirs["data"], "jwxt", "jwxt_lock.json"))
     restored = JWXTClient(account="u1", password="p1")
     assert restored._failed_attempts == MAX_FAILED_ATTEMPTS
@@ -105,7 +105,7 @@ def test_lock_persistence_roundtrip(isolated_dirs, monkeypatch):
 
 def test_lock_persistence_account_mismatch(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
-    _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
+    _drive_failures(client, monkeypatch, "登录失败", MAX_FAILED_ATTEMPTS)
     other = JWXTClient(account="u2", password="p1")
     assert other._failed_attempts == 0
     assert other.is_locked() == (False, None)
@@ -123,7 +123,7 @@ def test_lock_persistence_expired_not_restored(isolated_dirs, monkeypatch):
 
 def test_clear_lock_removes_file(isolated_dirs, monkeypatch):
     client = make_client(isolated_dirs)
-    _drive_failures(client, monkeypatch, "密码错误", MAX_FAILED_ATTEMPTS)
+    _drive_failures(client, monkeypatch, "登录失败", MAX_FAILED_ATTEMPTS)
     lock_file = os.path.join(isolated_dirs["data"], "jwxt", "jwxt_lock.json")
     assert os.path.exists(lock_file)
     lock._clear_lock(client)

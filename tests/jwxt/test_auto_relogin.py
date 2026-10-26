@@ -119,9 +119,9 @@ def test_auto_relogin_transient_failure_counts_and_cycle_once(isolated_dirs, mon
     assert client._relogin_failures_today == 1
     assert client._credentials_invalid is False
     assert "自动重登临时失败" in caplog.text
-    # 同周期第二次：周期标志拦截，零登录请求
+    # 同周期第二次：周期标志拦截，零登录请求（登录尝试次数 = RELOGIN_LOGIN_ATTEMPTS）
     assert client._try_auto_relogin() is False
-    assert len(login_calls) == 1
+    assert len(login_calls) == 2
     assert client._relogin_failures_today == 1
 
 
@@ -151,7 +151,8 @@ def test_auto_relogin_failure_feeds_lock_counter(isolated_dirs, monkeypatch):
                         lambda *a, **k: {"code": -1, "message": "验证码错误"})
     client.cookie_valid = False
     assert client._try_auto_relogin() is False
-    assert client._failed_attempts == 1
+    # 验证码错误属临时性失败：不累计锁定计数（避免误触发冷却阻塞恢复）
+    assert client._failed_attempts == 0
 
 
 def test_manual_login_clears_credentials_invalid_flag(isolated_dirs, monkeypatch):
